@@ -3,10 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 
 type View = "home" | "adaptacion" | "proyecto";
-type UploadKey = "dictamen" | "programacion" | "unidades" | "material" | "proyecto";
+type UploadKey = "dictamen" | "programacion" | "unidades" | "material" | "proyecto" | "project_math" | "project_language" | "project_science" | "project_english";
 type Job = { id: string; kind: string; title: string; status: string; createdAt: number; result?: string };
 type ApiModel = { id: string; label: string; cost: string; rank: number };
 const courses = ["1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO"];
+const projectSubjects: Array<{ id: "project_math" | "project_language" | "project_science" | "project_english"; label: string; icon: string }> = [
+  { id: "project_math", label: "Matemáticas", icon: "123" },
+  { id: "project_language", label: "Lengua", icon: "📖" },
+  { id: "project_science", label: "Conocimiento", icon: "🌍" },
+  { id: "project_english", label: "Inglés", icon: "ABC" },
+];
 
 function UploadBox({ id, eyebrow, title, description, files, onFiles, optional = false }: { id: UploadKey; eyebrow: string; title: string; description: string; files: File[]; onFiles: (id: UploadKey, files: File[]) => void; optional?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
@@ -22,7 +28,7 @@ function UploadBox({ id, eyebrow, title, description, files, onFiles, optional =
 
 export default function Home() {
   const [view, setView] = useState<View>("home");
-  const [files, setFiles] = useState<Record<UploadKey, File[]>>({ dictamen: [], programacion: [], unidades: [], material: [], proyecto: [] });
+  const [files, setFiles] = useState<Record<UploadKey, File[]>>({ dictamen: [], programacion: [], unidades: [], material: [], proyecto: [], project_math: [], project_language: [], project_science: [], project_english: [] });
   const [notice, setNotice] = useState("");
   const [studentName, setStudentName] = useState("");
   const [currentCourse, setCurrentCourse] = useState("");
@@ -48,6 +54,7 @@ export default function Home() {
   const [projectTarget, setProjectTarget] = useState("");
   const [adaptingProject, setAdaptingProject] = useState(false);
   const [adaptedProject, setAdaptedProject] = useState<{ result: string; jobId: string } | null>(null);
+  const [projectSubject, setProjectSubject] = useState<"project_math" | "project_language" | "project_science" | "project_english">("project_math");
   const [recommendation, setRecommendation] = useState<{ recommendedCourse: string; explanation: string; confidence: string; caveat: string } | null>(null);
   const addFiles = (key: UploadKey, incoming: File[]) => setFiles((current) => ({ ...current, [key]: [...current[key], ...incoming] }));
   const go = (next: View) => { setNotice(""); setResult(""); setActiveJob(""); setAdaptedProject(null); setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
@@ -77,7 +84,7 @@ export default function Home() {
     setNotice(""); setResult(""); setAdaptedProject(null);
     if (kind === "adaptation" && (!studentName.trim() || !currentCourse || !targetCourse)) { setNotice("Completa el nombre, el curso actual y el nivel de adaptación."); return; }
     if (kind === "project" && !currentCourse) { setNotice("Selecciona el curso del proyecto."); return; }
-    const groups: [UploadKey, File[]][] = kind === "adaptation" ? [["dictamen", files.dictamen], ["programacion", files.programacion], ["unidades", files.unidades], ["material", files.material]] : [["proyecto", files.proyecto]];
+    const groups: [UploadKey, File[]][] = kind === "adaptation" ? [["dictamen", files.dictamen], ["programacion", files.programacion], ["unidades", files.unidades], ["material", files.material]] : [["project_math", files.project_math], ["project_language", files.project_language], ["project_science", files.project_science], ["project_english", files.project_english]];
     if (!groups.some(([, list]) => list.length)) { setNotice("Añade al menos un documento antes de generar."); return; }
     const allSelected = groups.flatMap(([category, list]) => list.map((file) => ({ category, file })));
     const oversized = allSelected.find(({ file }) => file.size > 60 * 1024 * 1024);
@@ -150,7 +157,7 @@ export default function Home() {
       <button className="back" onClick={() => go("home")}>← Volver al inicio</button><div className="workspace-title"><span className="section-kicker blue-ink">PROYECTO INTERDISCIPLINAR</span><h1>Una idea, muchas formas de aprender</h1><p>Reúne las unidades de las distintas áreas y crea una experiencia conectada, participativa y con sentido.</p></div>
       <div className="project-layout"><div className="project-main">
         <div className="form-section"><span className="step-label blue-ink">01 · CONTEXTO DEL PROYECTO</span><h2>Define el punto de partida</h2><div className="field-grid"><div className="field"><label htmlFor="project-course">Curso o grupo</label><select id="project-course" value={currentCourse} onChange={(e) => setCurrentCourse(e.target.value)}><option value="" disabled>Selecciona un curso</option>{courses.map((c) => <option key={c}>{c}</option>)}</select></div><div className="field"><label htmlFor="duration">Duración aproximada</label><select id="duration" value={duration} onChange={(e) => setDuration(e.target.value)}><option value="" disabled>Selecciona una duración</option><option>1–2 semanas</option><option>3–4 semanas</option><option>Un trimestre</option></select></div></div><div className="field full"><label htmlFor="theme">Tema, reto o centro de interés</label><input id="theme" value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="Ej. ¿Cómo podemos cuidar el agua en nuestro colegio?" /></div></div>
-        <div className="form-section"><span className="step-label blue-ink">02 · UNIDADES DE LAS ÁREAS</span><h2>Añade todo lo que quieres conectar</h2><p className="section-help">Sube juntas las unidades de Matemáticas, Lengua, Conocimiento del Medio e Inglés. La IA identificará conexiones entre ellas.</p><UploadBox id="proyecto" eyebrow="UDI Y MATERIALES" title="Documentos de todas las áreas" description="Nombra claramente cada archivo por asignatura para obtener una integración más precisa." files={files.proyecto} onFiles={addFiles} /><div className="subject-row"><span>∑ Matemáticas</span><span>Aa Lengua</span><span>◎ Conocimiento</span><span>Hello! Inglés</span></div></div>
+        <div className="form-section"><span className="step-label blue-ink">02 · DOCUMENTOS POR ÁREAS</span><h2>Añade todo lo que quieres conectar</h2><p className="section-help">Selecciona una asignatura y añade sus UDI, programación y materiales. Puedes cambiar de área sin perder los documentos ya seleccionados.</p><div className="subject-picker">{projectSubjects.map((subject) => <button type="button" key={subject.id} className={projectSubject === subject.id ? "active" : ""} onClick={() => setProjectSubject(subject.id)}><i>{subject.icon}</i><strong>{subject.label}</strong><small>{files[subject.id].length ? `${files[subject.id].length} archivo${files[subject.id].length === 1 ? "" : "s"}` : "Añadir documentos"}</small></button>)}</div>{projectSubjects.map((subject) => projectSubject === subject.id && <UploadBox key={subject.id} id={subject.id} eyebrow={`DOCUMENTOS DE ${subject.label.toUpperCase()}`} title={`UDI y programación de ${subject.label}`} description="Puedes subir numerosos PDF, documentos, presentaciones e imágenes. Se conservarán asociados a esta asignatura." files={files[subject.id]} onFiles={addFiles} />)}<div className="project-upload-summary">{projectSubjects.map((subject) => <span key={subject.id}><b>{subject.icon}</b> {subject.label}: {files[subject.id].length}</span>)}</div></div>
         <div className="notes-field"><label htmlFor="project-notes">Algo que no puede faltar <span>Opcional</span></label><textarea id="project-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Intereses del grupo, recursos del centro, fechas señaladas, necesidades específicas..." /></div>{notice && <div className="success-note">{notice}</div>}{result && <><ResultPanel result={result} jobId={activeJob} /><section className="project-adapter"><span className="step-label blue-ink">SIGUIENTE PASO · OPCIONAL</span><h2>Adaptar este proyecto a otro nivel</h2><p>Se conservarán el mismo reto, producto final y trabajo interdisciplinar. Solo se ajustarán el acceso, los apoyos, las tareas y la evaluación.</p><div className="project-adapter-controls"><select aria-label="Nivel educativo para adaptar el proyecto" value={projectTarget} onChange={(event) => setProjectTarget(event.target.value)}><option value="" disabled>Selecciona un nivel educativo</option>{courses.map((course) => <option key={course}>{course}</option>)}</select><button className="primary blue-primary" disabled={adaptingProject} onClick={adaptProject}>{adaptingProject ? "Adaptando el proyecto…" : "Adaptar este proyecto"}</button></div></section>{adaptedProject && <div className="adapted-project-result"><ResultPanel result={adaptedProject.result} jobId={adaptedProject.jobId} /></div>}</>}<div className="form-footer"><p><strong>Una experiencia común para todo el grupo</strong><br />Un único reto interdisciplinar, producto final y participación familiar.</p><button className="primary blue-primary" disabled={processing} onClick={() => generate("project")}>{processing ? "Conectando las áreas…" : "Generar proyecto"} <span>✦</span></button></div>
       </div><aside className="project-output"><span className="output-tag">LA PROPUESTA INCLUIRÁ</span><h3>De las UDI a una experiencia compartida</h3><ul><li><i>01</i><div><strong>Hilo conductor</strong><p>Una narrativa que conecta todas las áreas.</p></div></li><li><i>02</i><div><strong>Producto final</strong><p>Un resultado auténtico para mostrar y celebrar.</p></div></li><li><i>03</i><div><strong>Dinámicas activas</strong><p>Retos, equipos, talleres y decisiones del alumnado.</p></div></li><li><i>04</i><div><strong>Participación familiar</strong><p>Propuestas concretas para sumar a las familias.</p></div></li><li><i>05</i><div><strong>Evaluación integrada</strong><p>Rúbrica y evidencias por áreas.</p></div></li></ul><blockquote>“Aprender deja de ser una suma de asignaturas y se convierte en una experiencia.”</blockquote></aside></div>
     </section>}
