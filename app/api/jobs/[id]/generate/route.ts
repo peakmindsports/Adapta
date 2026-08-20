@@ -46,10 +46,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email = ?").bind(owner).first<{ model: string }>();
     const model = setting?.model || OPENAI_MODEL || "gpt-5-mini";
     const callModel = async (requestContent: any[], maxOutputTokens: number) => {
-      const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: [{ role: "user", content: requestContent }], max_output_tokens: maxOutputTokens }) });
-      const data = await response.json() as any;
-      if (!response.ok) throw new Error(data?.error?.message || "No se pudo completar una parte del libro.");
-      return extractText(data);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: [{ role: "user", content: requestContent }], max_output_tokens: maxOutputTokens }) });
+        const data = await response.json() as any;
+        if (response.ok) return extractText(data);
+        if (response.status !== 429 || attempt === 4) throw new Error(data?.error?.message || "No se pudo completar una parte del libro.");
+        const message = data?.error?.message || "";
+        const suggestedSeconds = Number(response.headers.get("retry-after")) || Number(message.match(/try again in ([\d.]+)s/i)?.[1]) || 15;
+        const waitMs = Math.min(60000, Math.max(10000, Math.ceil(suggestedSeconds * 1000) + 2000));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+      throw new Error("No se pudo completar una parte del libro tras varios reintentos.");
     };
     if (job.kind === "adaptation") {
       const units = preparedFiles.filter((file) => file.category === "unidades");
@@ -63,7 +70,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const sharedContext = `${personalContext}\n${contextSummaries.join("\n\n")}`;
       const chapters = new Array<string>(units.length);
       let nextUnit = 0;
-      await Promise.all(Array.from({ length: Math.min(3, units.length) }, async () => {
+      await Promise.all(Array.from({ length: Math.min(1, units.length) }, async () => {
         while (nextUnit < units.length) {
           const index = nextUnit++;
           const unit = units[index];
