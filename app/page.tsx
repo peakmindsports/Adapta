@@ -40,6 +40,8 @@ export default function Home() {
   const [selectedModel, setSelectedModel] = useState("");
   const [modelNote, setModelNote] = useState("");
   const [adminStatus, setAdminStatus] = useState("");
+  const [assessing, setAssessing] = useState(false);
+  const [recommendation, setRecommendation] = useState<{ recommendedCourse: string; explanation: string; confidence: string; caveat: string } | null>(null);
   const addFiles = (key: UploadKey, incoming: File[]) => setFiles((current) => ({ ...current, [key]: [...current[key], ...incoming] }));
   const go = (next: View) => { setNotice(""); setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const loadHistory = async () => { const response = await fetch("/api/jobs"); if (response.ok) setHistory((await response.json()).jobs); };
@@ -49,6 +51,20 @@ export default function Home() {
   const responseBody = async (response: Response) => {
     const text = await response.text();
     try { return JSON.parse(text); } catch { return { error: response.status === 413 ? "La plataforma rechazó un fragmento de la subida. Se ha reducido automáticamente el tamaño de los fragmentos; recarga la página e inténtalo de nuevo." : `El servidor no pudo procesar la solicitud (${response.status}).` }; }
+  };
+  const recommendLevel = async () => {
+    setRecommendation(null); setNotice("");
+    if (!studentName.trim() || !currentCourse) { setNotice("Indica el nombre y el curso actual antes de analizar los informes."); return; }
+    if (!files.dictamen.length) { setNotice("Añade al menos un dictamen, informe o adaptación previa."); return; }
+    setAssessing(true);
+    try {
+      const create = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "adaptation", studentName, currentCourse, targetCourse: "Pendiente de valoración" }) });
+      const created = await responseBody(create); if (!create.ok) throw new Error(created.error);
+      let done = 0;
+      for (const file of files.dictamen) { const chunkSize = 768 * 1024; const total = Math.ceil(file.size / chunkSize); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", "dictamen"); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo subir “${file.name}”.`); } done += 1; setNotice(`Informes preparados: ${done} de ${files.dictamen.length}`); }
+      const response = await fetch(`/api/jobs/${created.job.id}/recommend-level`, { method: "POST" }); const body = await responseBody(response); if (!response.ok) throw new Error(body.error);
+      setRecommendation(body.recommendation); setTargetCourse(body.recommendation.recommendedCourse); setNotice("");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo estimar el nivel."); } finally { setAssessing(false); }
   };
   const generate = async (kind: "adaptation" | "project") => {
     setNotice(""); setResult("");
@@ -103,6 +119,8 @@ export default function Home() {
         <div className="form-section"><span className="step-label">01 · INFORMACIÓN BÁSICA</span><h2>¿Para quién es esta adaptación?</h2><div className="field full"><label htmlFor="student">Nombre y apellidos</label><input id="student" value={studentName} onChange={(e) => setStudentName(e.target.value)} placeholder="Ej. Noa Martínez López" /></div><div className="field-grid"><div className="field"><label htmlFor="current">Curso en el que está matriculado</label><select id="current" value={currentCourse} onChange={(e) => setCurrentCourse(e.target.value)}><option value="" disabled>Selecciona un curso</option>{courses.map((c) => <option key={c}>{c}</option>)}</select></div><div className="field"><label htmlFor="target">Nivel al que adaptar el contenido</label><select id="target" value={targetCourse} onChange={(e) => setTargetCourse(e.target.value)}><option value="" disabled>Selecciona el nivel competencial</option>{courses.map((c) => <option key={c}>{c}</option>)}</select></div></div></div>
         <div className="form-section"><span className="step-label">02 · DOCUMENTACIÓN Y MATERIALES</span><h2>Comparte el contexto pedagógico</h2><p className="section-help">Puedes arrastrar archivos o seleccionarlos. Formatos admitidos: PDF, Word, PowerPoint e imágenes.</p>
           <UploadBox id="dictamen" eyebrow="DOCUMENTACIÓN DEL ALUMNO" title="Dictamen, adaptaciones o refuerzos" description="Nos ayudará a respetar las necesidades, medidas y orientaciones ya establecidas." files={files.dictamen} onFiles={addFiles} />
+          <div className="level-advisor"><div><strong>¿Qué nivel competencial sugieren los informes?</strong><p>La IA puede proponerte un curso de referencia. Podrás corregirlo antes de crear el libro.</p></div><button type="button" disabled={assessing || !files.dictamen.length} onClick={recommendLevel}>{assessing ? "Analizando informes…" : "Proponer nivel con IA"}</button></div>
+          {recommendation && <div className="recommendation-card"><span>NIVEL PROPUESTO · CONFIANZA {recommendation.confidence?.toUpperCase()}</span><h3>{recommendation.recommendedCourse}</h3><p>{recommendation.explanation}</p><small>{recommendation.caveat} La decisión final corresponde al equipo docente y de orientación.</small></div>}
           <UploadBox id="unidades" eyebrow="CONTENIDO DE PARTIDA" title="Unidades didácticas del curso actual" description="Añade las UDI que vas a impartir. Puedes subirlas todas o trabajar una cada vez." files={files.unidades} onFiles={addFiles} />
           <UploadBox id="material" eyebrow="MODELO DE NIVEL" title="Material del nivel de referencia" description="Libros, fichas o UDI del curso al que adaptaremos el contenido. Servirán como guía de formato y dificultad." files={files.material} onFiles={addFiles} optional />
         </div>
