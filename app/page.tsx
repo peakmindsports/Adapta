@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 
 type View = "home" | "adaptacion" | "proyecto";
 type UploadKey = "dictamen" | "unidades" | "material" | "proyecto";
+type Job = { id: string; kind: string; title: string; status: string; createdAt: number; result?: string };
 const courses = ["1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO"];
 
 function UploadBox({ id, eyebrow, title, description, files, onFiles, optional = false }: { id: UploadKey; eyebrow: string; title: string; description: string; files: File[]; onFiles: (id: UploadKey, files: File[]) => void; optional?: boolean }) {
@@ -22,15 +23,44 @@ export default function Home() {
   const [view, setView] = useState<View>("home");
   const [files, setFiles] = useState<Record<UploadKey, File[]>>({ dictamen: [], unidades: [], material: [], proyecto: [] });
   const [notice, setNotice] = useState("");
+  const [studentName, setStudentName] = useState("");
+  const [currentCourse, setCurrentCourse] = useState("");
+  const [targetCourse, setTargetCourse] = useState("");
+  const [notes, setNotes] = useState("");
+  const [theme, setTheme] = useState("");
+  const [duration, setDuration] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const [result, setResult] = useState("");
+  const [activeJob, setActiveJob] = useState("");
+  const [history, setHistory] = useState<Job[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const addFiles = (key: UploadKey, incoming: File[]) => setFiles((current) => ({ ...current, [key]: [...current[key], ...incoming] }));
   const go = (next: View) => { setNotice(""); setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
-  const submit = (kind: string) => { setNotice(`${kind} listo para generar. Aquí se conectará el análisis de IA y la descarga del documento final.`); setTimeout(() => document.querySelector(".success-note")?.scrollIntoView({ behavior: "smooth" }), 20); };
+  const loadHistory = async () => { const response = await fetch("/api/jobs"); if (response.ok) setHistory((await response.json()).jobs); };
+  const openHistory = async () => { await loadHistory(); setShowHistory(true); };
+  const generate = async (kind: "adaptation" | "project") => {
+    setNotice(""); setResult("");
+    if (kind === "adaptation" && (!studentName.trim() || !currentCourse || !targetCourse)) { setNotice("Completa el nombre, el curso actual y el nivel de adaptación."); return; }
+    if (kind === "project" && !currentCourse) { setNotice("Selecciona el curso del proyecto."); return; }
+    const groups: [UploadKey, File[]][] = kind === "adaptation" ? [["dictamen", files.dictamen], ["unidades", files.unidades], ["material", files.material]] : [["proyecto", files.proyecto]];
+    if (!groups.some(([, list]) => list.length)) { setNotice("Añade al menos un documento antes de generar."); return; }
+    setProcessing(true);
+    try {
+      const create = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, studentName, currentCourse, targetCourse, theme }) });
+      const created = await create.json(); if (!create.ok) throw new Error(created.error || "No se pudo crear el trabajo.");
+      setActiveJob(created.job.id);
+      for (const [category, list] of groups) { if (!list.length) continue; const form = new FormData(); form.append("category", category); list.forEach((file) => form.append("files", file)); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await upload.json(); if (!upload.ok) throw new Error(uploaded.error || "No se pudieron guardar los archivos."); }
+      const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes, theme, duration }) });
+      const generated = await response.json(); if (!response.ok) throw new Error(generated.error || "No se pudo generar la propuesta.");
+      setResult(generated.result); setNotice("Propuesta generada y guardada correctamente."); await loadHistory();
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Ha ocurrido un error inesperado."); } finally { setProcessing(false); setTimeout(() => document.querySelector(".result-panel, .success-note")?.scrollIntoView({ behavior: "smooth" }), 20); }
+  };
 
   return <main>
     <header className="site-header">
       <button className="brand" onClick={() => go("home")} aria-label="Ir al inicio"><span className="brand-mark">A<span>+</span></span><span><strong>Adapta</strong><small>Docencia a medida</small></span></button>
       <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button></nav>
-      <div className="teacher-pill"><span>MP</span><div><strong>Mi espacio</strong><small>Docente</small></div></div>
+      <button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button>
     </header>
 
     {view === "home" && <div className="home-view">
@@ -50,25 +80,30 @@ export default function Home() {
     {view === "adaptacion" && <section className="workspace">
       <button className="back" onClick={() => go("home")}>← Volver al inicio</button><div className="workspace-title"><span className="section-kicker coral-ink">ADAPTACIÓN CURRICULAR</span><h1>Conozcamos al alumno</h1><p>La información que compartas nos ayudará a crear una propuesta realista, respetuosa y útil para el aula.</p></div>
       <div className="form-shell"><aside><span>01</span><strong>Datos del alumno</strong><i /><span>02</span><strong>Documentación</strong><i /><span>03</span><strong>Generar</strong></aside><div className="form-content">
-        <div className="form-section"><span className="step-label">01 · INFORMACIÓN BÁSICA</span><h2>¿Para quién es esta adaptación?</h2><div className="field full"><label htmlFor="student">Nombre y apellidos</label><input id="student" placeholder="Ej. Noa Martínez López" /></div><div className="field-grid"><div className="field"><label htmlFor="current">Curso en el que está matriculado</label><select id="current" defaultValue=""><option value="" disabled>Selecciona un curso</option>{courses.map((c) => <option key={c}>{c}</option>)}</select></div><div className="field"><label htmlFor="target">Nivel al que adaptar el contenido</label><select id="target" defaultValue=""><option value="" disabled>Selecciona el nivel competencial</option>{courses.map((c) => <option key={c}>{c}</option>)}</select></div></div></div>
+        <div className="form-section"><span className="step-label">01 · INFORMACIÓN BÁSICA</span><h2>¿Para quién es esta adaptación?</h2><div className="field full"><label htmlFor="student">Nombre y apellidos</label><input id="student" value={studentName} onChange={(e) => setStudentName(e.target.value)} placeholder="Ej. Noa Martínez López" /></div><div className="field-grid"><div className="field"><label htmlFor="current">Curso en el que está matriculado</label><select id="current" value={currentCourse} onChange={(e) => setCurrentCourse(e.target.value)}><option value="" disabled>Selecciona un curso</option>{courses.map((c) => <option key={c}>{c}</option>)}</select></div><div className="field"><label htmlFor="target">Nivel al que adaptar el contenido</label><select id="target" value={targetCourse} onChange={(e) => setTargetCourse(e.target.value)}><option value="" disabled>Selecciona el nivel competencial</option>{courses.map((c) => <option key={c}>{c}</option>)}</select></div></div></div>
         <div className="form-section"><span className="step-label">02 · DOCUMENTACIÓN Y MATERIALES</span><h2>Comparte el contexto pedagógico</h2><p className="section-help">Puedes arrastrar archivos o seleccionarlos. Formatos admitidos: PDF, Word, PowerPoint e imágenes.</p>
           <UploadBox id="dictamen" eyebrow="DOCUMENTACIÓN DEL ALUMNO" title="Dictamen, adaptaciones o refuerzos" description="Nos ayudará a respetar las necesidades, medidas y orientaciones ya establecidas." files={files.dictamen} onFiles={addFiles} />
           <UploadBox id="unidades" eyebrow="CONTENIDO DE PARTIDA" title="Unidades didácticas del curso actual" description="Añade las UDI que vas a impartir. Puedes subirlas todas o trabajar una cada vez." files={files.unidades} onFiles={addFiles} />
           <UploadBox id="material" eyebrow="MODELO DE NIVEL" title="Material del nivel de referencia" description="Libros, fichas o UDI del curso al que adaptaremos el contenido. Servirán como guía de formato y dificultad." files={files.material} onFiles={addFiles} optional />
         </div>
-        <div className="notes-field"><label htmlFor="priorities">Indicaciones para la adaptación <span>Opcional</span></label><textarea id="priorities" placeholder="Ej. Priorizar actividades manipulativas, reducir la carga de escritura, mantener el tema de la unidad..." /></div>{notice && <div className="success-note">✓ {notice}</div>}
-        <div className="form-footer"><p><strong>Privacidad educativa</strong><br />La documentación se usará únicamente para preparar esta propuesta.</p><button className="primary" onClick={() => submit("La adaptación")}>Generar adaptación <span>✦</span></button></div>
+        <div className="notes-field"><label htmlFor="priorities">Indicaciones para la adaptación <span>Opcional</span></label><textarea id="priorities" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej. Priorizar actividades manipulativas, reducir la carga de escritura, mantener el tema de la unidad..." /></div>{notice && <div className="success-note">{notice}</div>}{result && <ResultPanel result={result} jobId={activeJob} />}
+        <div className="form-footer"><p><strong>Privacidad educativa</strong><br />La documentación queda protegida en tu espacio privado.</p><button className="primary" disabled={processing} onClick={() => generate("adaptation")}>{processing ? "Analizando materiales…" : "Generar adaptación"} <span>✦</span></button></div>
       </div></div>
     </section>}
 
     {view === "proyecto" && <section className="workspace project-workspace">
       <button className="back" onClick={() => go("home")}>← Volver al inicio</button><div className="workspace-title"><span className="section-kicker blue-ink">PROYECTO INTERDISCIPLINAR</span><h1>Una idea, muchas formas de aprender</h1><p>Reúne las unidades de las distintas áreas y crea una experiencia conectada, participativa y con sentido.</p></div>
       <div className="project-layout"><div className="project-main">
-        <div className="form-section"><span className="step-label blue-ink">01 · CONTEXTO DEL PROYECTO</span><h2>Define el punto de partida</h2><div className="field-grid"><div className="field"><label htmlFor="project-course">Curso o grupo</label><select id="project-course" defaultValue=""><option value="" disabled>Selecciona un curso</option>{courses.map((c) => <option key={c}>{c}</option>)}</select></div><div className="field"><label htmlFor="duration">Duración aproximada</label><select id="duration" defaultValue=""><option value="" disabled>Selecciona una duración</option><option>1–2 semanas</option><option>3–4 semanas</option><option>Un trimestre</option></select></div></div><div className="field full"><label htmlFor="theme">Tema, reto o centro de interés</label><input id="theme" placeholder="Ej. ¿Cómo podemos cuidar el agua en nuestro colegio?" /></div></div>
+        <div className="form-section"><span className="step-label blue-ink">01 · CONTEXTO DEL PROYECTO</span><h2>Define el punto de partida</h2><div className="field-grid"><div className="field"><label htmlFor="project-course">Curso o grupo</label><select id="project-course" value={currentCourse} onChange={(e) => setCurrentCourse(e.target.value)}><option value="" disabled>Selecciona un curso</option>{courses.map((c) => <option key={c}>{c}</option>)}</select></div><div className="field"><label htmlFor="duration">Duración aproximada</label><select id="duration" value={duration} onChange={(e) => setDuration(e.target.value)}><option value="" disabled>Selecciona una duración</option><option>1–2 semanas</option><option>3–4 semanas</option><option>Un trimestre</option></select></div></div><div className="field full"><label htmlFor="theme">Tema, reto o centro de interés</label><input id="theme" value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="Ej. ¿Cómo podemos cuidar el agua en nuestro colegio?" /></div></div>
         <div className="form-section"><span className="step-label blue-ink">02 · UNIDADES DE LAS ÁREAS</span><h2>Añade todo lo que quieres conectar</h2><p className="section-help">Sube juntas las unidades de Matemáticas, Lengua, Conocimiento del Medio e Inglés. La IA identificará conexiones entre ellas.</p><UploadBox id="proyecto" eyebrow="UDI Y MATERIALES" title="Documentos de todas las áreas" description="Nombra claramente cada archivo por asignatura para obtener una integración más precisa." files={files.proyecto} onFiles={addFiles} /><div className="subject-row"><span>∑ Matemáticas</span><span>Aa Lengua</span><span>◎ Conocimiento</span><span>Hello! Inglés</span></div></div>
-        <div className="notes-field"><label htmlFor="project-notes">Algo que no puede faltar <span>Opcional</span></label><textarea id="project-notes" placeholder="Intereses del grupo, recursos del centro, fechas señaladas, necesidades específicas..." /></div>{notice && <div className="success-note">✓ {notice}</div>}<div className="form-footer"><p><strong>Una propuesta completa</strong><br />Incluirá secuencia, evaluación y atención a la diversidad.</p><button className="primary blue-primary" onClick={() => submit("El proyecto")}>Generar proyecto <span>✦</span></button></div>
+        <div className="notes-field"><label htmlFor="project-notes">Algo que no puede faltar <span>Opcional</span></label><textarea id="project-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Intereses del grupo, recursos del centro, fechas señaladas, necesidades específicas..." /></div>{notice && <div className="success-note">{notice}</div>}{result && <ResultPanel result={result} jobId={activeJob} />}<div className="form-footer"><p><strong>Una propuesta completa</strong><br />Incluirá secuencia, evaluación y atención a la diversidad.</p><button className="primary blue-primary" disabled={processing} onClick={() => generate("project")}>{processing ? "Conectando las áreas…" : "Generar proyecto"} <span>✦</span></button></div>
       </div><aside className="project-output"><span className="output-tag">LA PROPUESTA INCLUIRÁ</span><h3>De las UDI a una experiencia compartida</h3><ul><li><i>01</i><div><strong>Hilo conductor</strong><p>Una narrativa que conecta todas las áreas.</p></div></li><li><i>02</i><div><strong>Producto final</strong><p>Un resultado auténtico para mostrar y celebrar.</p></div></li><li><i>03</i><div><strong>Dinámicas activas</strong><p>Retos, equipos, talleres y decisiones del alumnado.</p></div></li><li><i>04</i><div><strong>Participación familiar</strong><p>Propuestas concretas para sumar a las familias.</p></div></li><li><i>05</i><div><strong>Evaluación integrada</strong><p>Rúbrica y evidencias por áreas.</p></div></li></ul><blockquote>“Aprender deja de ser una suma de asignaturas y se convierte en una experiencia.”</blockquote></aside></div>
     </section>}
+    {showHistory && <div className="history-overlay" onClick={() => setShowHistory(false)}><aside className="history-panel" onClick={(e) => e.stopPropagation()}><button className="history-close" onClick={() => setShowHistory(false)}>×</button><span className="section-kicker blue-ink">MI ESPACIO</span><h2>Trabajos guardados</h2><p>Consulta y descarga tus últimas propuestas.</p><div className="history-list">{history.length ? history.map((job) => <article key={job.id}><div><span>{job.kind === "adaptation" ? "ADAPTACIÓN" : "PROYECTO"}</span><strong>{job.title}</strong><small>{new Date(job.createdAt).toLocaleDateString("es-ES")} · {job.status === "completed" ? "Completado" : job.status}</small></div>{job.status === "completed" && <a href={`/api/jobs/${job.id}/download`}>Descargar</a>}</article>) : <div className="empty-history">Todavía no has generado ninguna propuesta.</div>}</div></aside></div>}
     <footer><span className="brand-mark small">A<span>+</span></span><p>Adapta · Herramientas docentes para una escuela inclusiva</p><span>Hecho con cuidado para quienes enseñan</span></footer>
   </main>;
+}
+
+function ResultPanel({ result, jobId }: { result: string; jobId: string }) {
+  return <section className="result-panel"><div><span>PROPUESTA GENERADA</span><h2>Tu documento está listo</h2></div><a href={`/api/jobs/${jobId}/download`}>Descargar documento ↓</a><pre>{result}</pre></section>;
 }
