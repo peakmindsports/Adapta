@@ -12,7 +12,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   await ensureSchema();
   const { id } = await context.params;
   const owner = ownerFrom(request);
-  const body = await request.json() as { notes?: string; theme?: string; duration?: string };
+  const body = await request.json() as { notes?: string; theme?: string; duration?: string; studentContext?: { strengths?: string; classroomContext?: string; familyContext?: string; effectiveSupports?: string } };
   const { DB, FILES, OPENAI_API_KEY, OPENAI_MODEL } = runtime();
   if (!OPENAI_API_KEY) return jsonError("El administrador debe configurar OPENAI_API_KEY para activar la generación.", 503);
   const job = await DB.prepare("SELECT * FROM jobs WHERE id = ? AND owner_email = ?").bind(id, owner).first<Record<string, unknown>>();
@@ -23,7 +23,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const openAIFileIds: string[] = [];
   const preparedFiles: Array<{ id: string; filename: string; category: string }> = [];
   try {
-    const content: any[] = [{ type: "input_text", text: job.kind === "adaptation" ? adaptationPrompt(job, body.notes || "") : projectPrompt(job, body.notes || "", body.theme || "", body.duration || "") }];
+    const personalContext = body.studentContext ? `\nCONTEXTO APORTADO POR EL DOCENTE:\n- Fortalezas, intereses y motivadores: ${body.studentContext.strengths || "No indicado"}\n- Situaciones observables y necesidades en el aula: ${body.studentContext.classroomContext || "No indicado"}\n- Contexto familiar relevante: ${body.studentContext.familyContext || "No indicado"}\n- Estrategias eficaces y situaciones a evitar: ${body.studentContext.effectiveSupports || "No indicado"}\nUsa este contexto para ajustar actividades, apoyos, regulación, agrupamientos y participación familiar. No conviertas conductas en rasgos personales ni hagas inferencias clínicas.` : "";
+    const content: any[] = [{ type: "input_text", text: job.kind === "adaptation" ? adaptationPrompt(job, `${body.notes || ""}${personalContext}`) : projectPrompt(job, body.notes || "", body.theme || "", body.duration || "") }];
     for (const row of fileRows.results.slice(0, 36)) {
       let fileParts: ArrayBuffer[] = [];
       if (row.storage_key.startsWith("chunks:")) {
@@ -59,7 +60,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         const batch = contextFiles.slice(index, index + 8);
         contextSummaries.push(await callModel([{ type: "input_text", text: "Analiza estos documentos de contexto. Distingue claramente: (a) dictámenes y medidas de apoyo; (b) programación didáctica anual, extrayendo por cada unidad sus objetivos, contenidos/saberes, competencias específicas y criterios de evaluación; y (c) materiales del nivel competencial de referencia, extrayendo formato, lenguaje, apoyos visuales, actividades y dificultad. Produce un mapa curricular fiel que permita adaptar cada unidad sin perder su intención educativa. No diagnostiques ni inventes datos." }, ...batch.map((file) => ({ type: "input_file", file_id: file.id }))], 4500));
       }
-      const sharedContext = contextSummaries.join("\n\n");
+      const sharedContext = `${personalContext}\n${contextSummaries.join("\n\n")}`;
       const chapters = new Array<string>(units.length);
       let nextUnit = 0;
       await Promise.all(Array.from({ length: Math.min(3, units.length) }, async () => {
