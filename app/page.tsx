@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 
 type View = "home" | "adaptacion" | "proyecto";
-type UploadKey = "dictamen" | "unidades" | "material" | "proyecto";
+type UploadKey = "dictamen" | "programacion" | "unidades" | "material" | "proyecto";
 type Job = { id: string; kind: string; title: string; status: string; createdAt: number; result?: string };
 type ApiModel = { id: string; label: string; cost: string; rank: number };
 const courses = ["1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO"];
@@ -22,7 +22,7 @@ function UploadBox({ id, eyebrow, title, description, files, onFiles, optional =
 
 export default function Home() {
   const [view, setView] = useState<View>("home");
-  const [files, setFiles] = useState<Record<UploadKey, File[]>>({ dictamen: [], unidades: [], material: [], proyecto: [] });
+  const [files, setFiles] = useState<Record<UploadKey, File[]>>({ dictamen: [], programacion: [], unidades: [], material: [], proyecto: [] });
   const [notice, setNotice] = useState("");
   const [studentName, setStudentName] = useState("");
   const [currentCourse, setCurrentCourse] = useState("");
@@ -70,7 +70,7 @@ export default function Home() {
     setNotice(""); setResult("");
     if (kind === "adaptation" && (!studentName.trim() || !currentCourse || !targetCourse)) { setNotice("Completa el nombre, el curso actual y el nivel de adaptación."); return; }
     if (kind === "project" && !currentCourse) { setNotice("Selecciona el curso del proyecto."); return; }
-    const groups: [UploadKey, File[]][] = kind === "adaptation" ? [["dictamen", files.dictamen], ["unidades", files.unidades], ["material", files.material]] : [["proyecto", files.proyecto]];
+    const groups: [UploadKey, File[]][] = kind === "adaptation" ? [["dictamen", files.dictamen], ["programacion", files.programacion], ["unidades", files.unidades], ["material", files.material]] : [["proyecto", files.proyecto]];
     if (!groups.some(([, list]) => list.length)) { setNotice("Añade al menos un documento antes de generar."); return; }
     const allSelected = groups.flatMap(([category, list]) => list.map((file) => ({ category, file })));
     const oversized = allSelected.find(({ file }) => file.size > 60 * 1024 * 1024);
@@ -121,6 +121,7 @@ export default function Home() {
           <UploadBox id="dictamen" eyebrow="DOCUMENTACIÓN DEL ALUMNO" title="Dictamen, adaptaciones o refuerzos" description="Nos ayudará a respetar las necesidades, medidas y orientaciones ya establecidas." files={files.dictamen} onFiles={addFiles} />
           <div className="level-advisor"><div><strong>¿Qué nivel competencial sugieren los informes?</strong><p>La IA puede proponerte un curso de referencia. Podrás corregirlo antes de crear el libro.</p></div><button type="button" disabled={assessing || !files.dictamen.length} onClick={recommendLevel}>{assessing ? "Analizando informes…" : "Proponer nivel con IA"}</button></div>
           {recommendation && <div className="recommendation-card"><span>NIVEL PROPUESTO · CONFIANZA {recommendation.confidence?.toUpperCase()}</span><h3>{recommendation.recommendedCourse}</h3><p>{recommendation.explanation}</p><small>{recommendation.caveat} La decisión final corresponde al equipo docente y de orientación.</small></div>}
+          <UploadBox id="programacion" eyebrow="MAPA CURRICULAR ANUAL" title="Programación didáctica completa" description="Objetivos, contenidos, competencias específicas, criterios de evaluación y su distribución en cada unidad." files={files.programacion} onFiles={addFiles} optional />
           <UploadBox id="unidades" eyebrow="CONTENIDO DE PARTIDA" title="Unidades didácticas del curso actual" description="Añade las UDI que vas a impartir. Puedes subirlas todas o trabajar una cada vez." files={files.unidades} onFiles={addFiles} />
           <UploadBox id="material" eyebrow="MODELO DE NIVEL" title="Material del nivel de referencia" description="Libros, fichas o UDI del curso al que adaptaremos el contenido. Servirán como guía de formato y dificultad." files={files.material} onFiles={addFiles} optional />
         </div>
