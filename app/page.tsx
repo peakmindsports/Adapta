@@ -107,7 +107,7 @@ export default function Home() {
           <UploadBox id="material" eyebrow="MODELO DE NIVEL" title="Material del nivel de referencia" description="Libros, fichas o UDI del curso al que adaptaremos el contenido. Servirán como guía de formato y dificultad." files={files.material} onFiles={addFiles} optional />
         </div>
         <div className="notes-field"><label htmlFor="priorities">Indicaciones para la adaptación <span>Opcional</span></label><textarea id="priorities" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej. Priorizar actividades manipulativas, reducir la carga de escritura, mantener el tema de la unidad..." /></div>{notice && <div className="success-note">{notice}</div>}{result && <ResultPanel result={result} jobId={activeJob} />}
-        <div className="form-footer"><p><strong>Privacidad educativa</strong><br />La documentación queda protegida en tu espacio privado.</p><button className="primary" disabled={processing} onClick={() => generate("adaptation")}>{processing ? "Analizando materiales…" : "Generar adaptación"} <span>✦</span></button></div>
+        <div className="form-footer"><p><strong>Libro anual completo</strong><br />Cada UDI se convertirá en un capítulo adaptado y todo quedará unido en un documento.</p><button className="primary" disabled={processing} onClick={() => generate("adaptation")}>{processing ? "Creando el libro por unidades…" : "Generar libro adaptado"} <span>✦</span></button></div>
       </div></div>
     </section>}
 

@@ -21,6 +21,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!fileRows.results.length) return jsonError("Añade al menos un documento antes de generar.");
   await DB.prepare("UPDATE jobs SET status = 'generating', error = NULL, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
   const openAIFileIds: string[] = [];
+  const preparedFiles: Array<{ id: string; filename: string; category: string }> = [];
   try {
     const content: any[] = [{ type: "input_text", text: job.kind === "adaptation" ? adaptationPrompt(job, body.notes || "") : projectPrompt(job, body.notes || "", body.theme || "", body.duration || "") }];
     for (const row of fileRows.results.slice(0, 36)) {
@@ -38,10 +39,42 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const uploaded = await uploadedResponse.json() as any;
       if (!uploadedResponse.ok || !uploaded.id) throw new Error(uploaded?.error?.message || `No se pudo preparar “${row.filename}” para el análisis.`);
       openAIFileIds.push(uploaded.id);
+      preparedFiles.push({ id: uploaded.id, filename: row.filename, category: row.category });
       content.push({ type: "input_file", file_id: uploaded.id });
     }
     const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email = ?").bind(owner).first<{ model: string }>();
     const model = setting?.model || OPENAI_MODEL || "gpt-5-mini";
+    const callModel = async (requestContent: any[], maxOutputTokens: number) => {
+      const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: [{ role: "user", content: requestContent }], max_output_tokens: maxOutputTokens }) });
+      const data = await response.json() as any;
+      if (!response.ok) throw new Error(data?.error?.message || "No se pudo completar una parte del libro.");
+      return extractText(data);
+    };
+    if (job.kind === "adaptation") {
+      const units = preparedFiles.filter((file) => file.category === "unidades");
+      const contextFiles = preparedFiles.filter((file) => file.category !== "unidades");
+      if (!units.length) throw new Error("Añade las unidades didácticas del curso actual para generar el libro adaptado.");
+      const contextSummaries: string[] = [];
+      for (let index = 0; index < contextFiles.length; index += 8) {
+        const batch = contextFiles.slice(index, index + 8);
+        contextSummaries.push(await callModel([{ type: "input_text", text: "Analiza estos dictámenes, medidas de apoyo y materiales del nivel de referencia. Extrae únicamente orientaciones pedagógicas, formato, nivel de lenguaje, apoyos visuales, tipo de actividades y evaluación que deban mantenerse al adaptar todas las unidades. No diagnostiques ni inventes datos." }, ...batch.map((file) => ({ type: "input_file", file_id: file.id }))], 3000));
+      }
+      const sharedContext = contextSummaries.join("\n\n");
+      const chapters = new Array<string>(units.length);
+      let nextUnit = 0;
+      await Promise.all(Array.from({ length: Math.min(3, units.length) }, async () => {
+        while (nextUnit < units.length) {
+          const index = nextUnit++;
+          const unit = units[index];
+          const prompt = `${adaptationPrompt(job, body.notes || "")}\n\nEstás redactando el CAPÍTULO ${index + 1} de ${units.length} de un libro anual adaptado. La unidad original está en el archivo “${unit.filename}”. Adapta exclusivamente esta unidad, conservando su tema y orden curricular.\n\nCONTEXTO COMÚN DEL ALUMNO Y MODELO DE NIVEL:\n${sharedContext || "No se aportó material adicional."}\n\nEl capítulo debe ser material directamente utilizable por el alumno, no una explicación para el docente. Incluye: portada breve de unidad; vocabulario esencial; explicaciones cortas y claras; ejemplos resueltos; actividades graduadas y variadas; propuestas manipulativas; espacios o instrucciones de respuesta; repasos; autoevaluación; y evaluación final. Cuando una ilustración mejore la comprensión, inserta un marcador preciso con el formato [IMAGEN: descripción clara, sencilla y adecuada a la edad]. Evita bloques largos de texto. Usa Markdown y empieza con “# Unidad ${index + 1}: …”.`;
+          chapters[index] = await callModel([{ type: "input_text", text: prompt }, { type: "input_file", file_id: unit.id }], 6500);
+        }
+      }));
+      const bookTitle = `# Libro anual adaptado\n\n**Alumno/a:** ${job.student_name}\n\n**Curso de referencia:** ${job.current_course}\n\n**Nivel competencial:** ${job.target_course}\n\n---\n\n## Índice\n${units.map((unit, index) => `${index + 1}. Unidad ${index + 1} · ${unit.filename}`).join("\n")}\n\n---\n\n`;
+      const result = bookTitle + chapters.join("\n\n---\n\n");
+      await DB.prepare("UPDATE jobs SET title = ?, status = 'completed', result = ?, updated_at = ? WHERE id = ?").bind(`Libro adaptado · ${job.student_name}`, result, Date.now(), id).run();
+      return Response.json({ result });
+    }
     let finalContent = content;
     if (openAIFileIds.length > 10) {
       const summaries: string[] = [];
