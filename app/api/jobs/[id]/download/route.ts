@@ -1,8 +1,9 @@
-import { Document, HeadingLevel, Packer, PageBreak, Paragraph, TextRun } from "docx";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { AlignmentType, Document, HeadingLevel, ImageRun, Packer, PageBreak, Paragraph, TextRun } from "docx";
+import { PDFDocument, PDFName, PDFNumber, PDFRawStream, StandardFonts, rgb } from "pdf-lib";
 import { ensureSchema, jsonError, ownerFrom, runtime, safeFilename } from "../../../_shared";
 
-type Block = { type: "heading" | "bullet" | "number" | "paragraph" | "break"; text: string; level?: number };
+type Block = { type: "heading" | "bullet" | "number" | "paragraph" | "break" | "image"; text: string; level?: number };
+type SourceImage = { bytes: Uint8Array; width: number; height: number; type: "jpg" | "png" };
 
 function cleanMarkdown(value: string) {
   return value.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/__([^_]+)__/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/^>\s?/, "").trim();
@@ -13,8 +14,9 @@ function parseMarkdown(markdown: string): Block[] {
   const flush = () => { if (paragraph.length) blocks.push({ type: "paragraph", text: cleanMarkdown(paragraph.join(" ")) }); paragraph = []; };
   for (const raw of markdown.replace(/\r/g, "").split("\n")) {
     const line = raw.trim(); if (!line) { flush(); continue; }
-    const heading = line.match(/^(#{1,6})\s+(.+)$/); const bullet = line.match(/^[-*+]\s+(.+)$/); const number = line.match(/^\d+[.)]\s+(.+)$/);
+    const heading = line.match(/^(#{1,6})\s+(.+)$/); const bullet = line.match(/^[-*+]\s+(.+)$/); const number = line.match(/^\d+[.)]\s+(.+)$/); const image = line.match(/^\[IMAGEN:\s*(.+)\]$/i);
     if (heading) { flush(); blocks.push({ type: "heading", text: cleanMarkdown(heading[2]), level: Math.min(3, heading[1].length) }); }
+    else if (image) { flush(); blocks.push({ type: "image", text: cleanMarkdown(image[1]) }); }
     else if (bullet) { flush(); blocks.push({ type: "bullet", text: cleanMarkdown(bullet[1]) }); }
     else if (number) { flush(); blocks.push({ type: "number", text: cleanMarkdown(number[1]) }); }
     else if (/^---+$/.test(line)) { flush(); blocks.push({ type: "break", text: "" }); }
@@ -23,12 +25,17 @@ function parseMarkdown(markdown: string): Block[] {
   flush(); return blocks.filter((block) => block.type === "break" || block.text);
 }
 
-async function makeWord(title: string, markdown: string) {
+async function makeWord(title: string, markdown: string, images: SourceImage[]) {
   const children: Paragraph[] = [new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 240 } }), new Paragraph({ children: [new TextRun({ text: "Libro adaptado", color: "277F91", size: 24 })], spacing: { after: 360 } })];
   let firstHeading = true;
+  let imageIndex = 0;
   for (const block of parseMarkdown(markdown)) {
     if (block.type === "break") { children.push(new Paragraph({ children: [new PageBreak()] })); continue; }
-    if (block.type === "heading") {
+    if (block.type === "image") {
+      const image = images[imageIndex++];
+      if (image) { const scale = Math.min(470 / image.width, 260 / image.height, 1); children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ type: image.type, data: image.bytes, transformation: { width: Math.round(image.width * scale), height: Math.round(image.height * scale) } })], spacing: { before: 120, after: 140 } })); }
+      else children.push(new Paragraph({ children: [new TextRun({ text: `Apoyo visual: ${block.text}`, italics: true, color: "277F91" })], spacing: { before: 80, after: 120 } }));
+    } else if (block.type === "heading") {
       if (!firstHeading && block.level === 1) children.push(new Paragraph({ children: [new PageBreak()] })); firstHeading = false;
       children.push(new Paragraph({ text: block.text, heading: block.level === 1 ? HeadingLevel.HEADING_1 : block.level === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3, spacing: { before: 180, after: 100 } }));
     } else if (block.type === "bullet") children.push(new Paragraph({ text: block.text, bullet: { level: 0 }, spacing: { after: 70 } }));
@@ -46,7 +53,7 @@ function wrapText(text: string, maxWidth: number, size: number, font: { widthOfT
   if (current) lines.push(current); return lines.length ? lines : [""];
 }
 
-async function makePdf(title: string, markdown: string) {
+async function makePdf(title: string, markdown: string, images: SourceImage[]) {
   const pdf = await PDFDocument.create(); const regular = await pdf.embedFont(StandardFonts.Helvetica); const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const pageSize: [number, number] = [595.28, 841.89]; const margin = 54; let page = pdf.addPage(pageSize); let y = pageSize[1] - margin;
   const addPage = () => { page = pdf.addPage(pageSize); y = pageSize[1] - margin; };
@@ -56,10 +63,14 @@ async function makePdf(title: string, markdown: string) {
     for (const line of lines) { page.drawText(line, { x: margin + indent, y, size, font, color }); y -= lineHeight; } y -= gap;
   };
   draw(title, 24, true, rgb(0.94, 0.34, 0.25), 0, 7); draw("Libro adaptado", 12, true, rgb(0.15, 0.5, 0.57), 0, 22);
-  let firstHeading = true;
+  let firstHeading = true; let imageIndex = 0;
   for (const block of parseMarkdown(markdown)) {
     if (block.type === "break") { if (y < pageSize[1] - margin - 20) addPage(); continue; }
-    if (block.type === "heading") { if (!firstHeading && block.level === 1 && y < pageSize[1] - margin - 80) addPage(); firstHeading = false; y -= block.level === 1 ? 10 : 4; draw(block.text, block.level === 1 ? 18 : block.level === 2 ? 15 : 12, true, block.level === 1 ? rgb(0.15, 0.5, 0.57) : rgb(0.09, 0.17, 0.19), 0, 8); }
+    if (block.type === "image") {
+      const image = images[imageIndex++];
+      if (image) { const embedded = image.type === "png" ? await pdf.embedPng(image.bytes) : await pdf.embedJpg(image.bytes); const scale = Math.min((pageSize[0] - margin * 2) / embedded.width, 245 / embedded.height, 1); const width = embedded.width * scale; const height = embedded.height * scale; if (y - height < margin + 28) addPage(); page.drawRectangle({ x: margin - 6, y: y - height - 6, width: pageSize[0] - margin * 2 + 12, height: height + 12, color: rgb(0.94, 0.98, 0.97), borderColor: rgb(0.55, 0.76, 0.72), borderWidth: 1 }); page.drawImage(embedded, { x: (pageSize[0] - width) / 2, y: y - height, width, height }); y -= height + 18; }
+      else { page.drawRectangle({ x: margin, y: y - 48, width: pageSize[0] - margin * 2, height: 48, color: rgb(0.9, 0.96, 0.95) }); draw(`Apoyo visual: ${block.text}`, 9.5, true, rgb(0.15, 0.5, 0.57), 10, 10); }
+    } else if (block.type === "heading") { if (!firstHeading && block.level === 1 && y < pageSize[1] - margin - 80) addPage(); firstHeading = false; y -= block.level === 1 ? 10 : 4; if (/actividad|producto final|demuestro|repaso|juego|taller/i.test(block.text)) { if (y < margin + 55) addPage(); page.drawRectangle({ x: margin - 8, y: y - 8, width: pageSize[0] - margin * 2 + 16, height: 30, color: rgb(0.99, 0.9, 0.84) }); } draw(block.text, block.level === 1 ? 18 : block.level === 2 ? 15 : 12, true, block.level === 1 ? rgb(0.15, 0.5, 0.57) : rgb(0.09, 0.17, 0.19), 0, 8); }
     else if (block.type === "bullet") draw(`- ${block.text}`, 10.5, false, rgb(0.18, 0.25, 0.26), 12, 4);
     else if (block.type === "number") draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 12, 4);
     else draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 0, 8);
@@ -68,12 +79,42 @@ async function makePdf(title: string, markdown: string) {
   return pdf.save();
 }
 
+async function readStoredFile(storageKey: string) {
+  const { FILES } = runtime(); const parts: ArrayBuffer[] = [];
+  if (storageKey.startsWith("chunks:")) { const listed = await FILES.list({ prefix: storageKey.slice(7) }); for (const entry of [...listed.objects].sort((a, b) => a.key.localeCompare(b.key))) { const part = await FILES.get(entry.key); if (part) parts.push(await part.arrayBuffer()); } }
+  else { const object = await FILES.get(storageKey); if (object) parts.push(await object.arrayBuffer()); }
+  return new Uint8Array(await new Blob(parts).arrayBuffer());
+}
+
+async function sourceImages(jobId: string, owner: string) {
+  const rows = await runtime().DB.prepare("SELECT content_type, storage_key FROM job_files WHERE job_id = ? AND owner_email = ? AND category = 'unidades' ORDER BY created_at").bind(jobId, owner).all<{ content_type: string; storage_key: string }>();
+  const selected: SourceImage[] = [];
+  for (const row of rows.results) {
+    try {
+      const bytes = await readStoredFile(row.storage_key);
+      if (/image\/jpe?g/i.test(row.content_type)) { selected.push({ bytes, width: 1200, height: 800, type: "jpg" }); continue; }
+      if (/image\/png/i.test(row.content_type)) { selected.push({ bytes, width: 1200, height: 800, type: "png" }); continue; }
+      if (!/pdf/i.test(row.content_type)) continue;
+      const source = await PDFDocument.load(bytes, { ignoreEncryption: true }); const candidates: SourceImage[] = [];
+      for (const [, object] of source.context.enumerateIndirectObjects()) {
+        if (!(object instanceof PDFRawStream)) continue;
+        const subtype = object.dict.get(PDFName.of("Subtype")); const filter = object.dict.get(PDFName.of("Filter"));
+        if (String(subtype) !== "/Image" || String(filter) !== "/DCTDecode") continue;
+        const width = object.dict.lookupMaybe(PDFName.of("Width"), PDFNumber)?.asNumber() || 0; const height = object.dict.lookupMaybe(PDFName.of("Height"), PDFNumber)?.asNumber() || 0;
+        if (width >= 240 && height >= 160) candidates.push({ bytes: object.getContents(), width, height, type: "jpg" });
+      }
+      candidates.sort((a, b) => b.width * b.height - a.width * a.height); selected.push(...candidates.slice(0, 3));
+    } catch { /* Un PDF sin imágenes JPEG utilizables no bloquea la descarga. */ }
+  }
+  return selected.slice(0, 36);
+}
+
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request);
   const job = await runtime().DB.prepare("SELECT title, result FROM jobs WHERE id = ? AND owner_email = ? AND status = 'completed'").bind(id, owner).first<{ title: string; result: string }>();
   if (!job?.result) return jsonError("El documento aún no está disponible.", 404);
-  const format = new URL(request.url).searchParams.get("format") === "docx" ? "docx" : "pdf"; const filename = safeFilename(job.title);
-  if (format === "docx") { const blob = await makeWord(job.title, job.result); return new Response(blob, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename}.docx"`, "Cache-Control": "private, no-store" } }); }
-  const bytes = await makePdf(job.title, job.result); const body = bytes.slice().buffer as ArrayBuffer;
+  const format = new URL(request.url).searchParams.get("format") === "docx" ? "docx" : "pdf"; const filename = safeFilename(job.title); const images = await sourceImages(id, owner);
+  if (format === "docx") { const blob = await makeWord(job.title, job.result, images); return new Response(blob, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename}.docx"`, "Cache-Control": "private, no-store" } }); }
+  const bytes = await makePdf(job.title, job.result, images); const body = bytes.slice().buffer as ArrayBuffer;
   return new Response(body, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"`, "Cache-Control": "private, no-store" } });
 }
