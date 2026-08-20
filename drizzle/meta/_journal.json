@@ -15,6 +15,13 @@
       "when": 1787251026378,
       "tag": "0001_nosy_runaways",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787257610763,
+      "tag": "0002_thin_smiling_tiger",
+      "breakpoints": true
     }
   ]
 }

@@ -32,3 +32,11 @@ export const userSettings = sqliteTable("user_settings", {
   model: text("model").notNull().default("gpt-5-mini"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+export const contextPhrases = sqliteTable("context_phrases", {
+  id: text("id").primaryKey(),
+  ownerEmail: text("owner_email").notNull(),
+  category: text("category").notNull(),
+  phrase: text("phrase").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});

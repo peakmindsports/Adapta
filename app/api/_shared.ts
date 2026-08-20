@@ -29,5 +29,7 @@ export async function ensureSchema() {
     DB.prepare("CREATE INDEX IF NOT EXISTS jobs_owner_created_idx ON jobs(owner_email, created_at DESC)"),
     DB.prepare("CREATE INDEX IF NOT EXISTS job_files_job_idx ON job_files(job_id)"),
     DB.prepare("CREATE TABLE IF NOT EXISTS user_settings (owner_email TEXT PRIMARY KEY NOT NULL, model TEXT DEFAULT 'gpt-5-mini' NOT NULL, updated_at INTEGER NOT NULL)"),
+    DB.prepare("CREATE TABLE IF NOT EXISTS context_phrases (id TEXT PRIMARY KEY NOT NULL, owner_email TEXT NOT NULL, category TEXT NOT NULL, phrase TEXT NOT NULL, created_at INTEGER NOT NULL)"),
+    DB.prepare("CREATE INDEX IF NOT EXISTS context_phrases_owner_idx ON context_phrases(owner_email, category)"),
   ]);
 }
