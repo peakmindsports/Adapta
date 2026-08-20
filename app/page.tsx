@@ -56,14 +56,20 @@ export default function Home() {
     if (kind === "project" && !currentCourse) { setNotice("Selecciona el curso del proyecto."); return; }
     const groups: [UploadKey, File[]][] = kind === "adaptation" ? [["dictamen", files.dictamen], ["unidades", files.unidades], ["material", files.material]] : [["proyecto", files.proyecto]];
     if (!groups.some(([, list]) => list.length)) { setNotice("Añade al menos un documento antes de generar."); return; }
-    const oversized = groups.flatMap(([, list]) => list).find((file) => file.size > 30 * 1024 * 1024);
-    if (oversized) { setNotice(`“${oversized.name}” supera el límite de 30 MB. Comprímelo o divídelo antes de continuar.`); return; }
+    const allSelected = groups.flatMap(([category, list]) => list.map((file) => ({ category, file })));
+    const oversized = allSelected.find(({ file }) => file.size > 60 * 1024 * 1024);
+    const totalBytes = allSelected.reduce((sum, { file }) => sum + file.size, 0);
+    if (oversized) { setNotice(`“${oversized.file.name}” supera el límite de 60 MB por documento.`); return; }
+    if (totalBytes > 180 * 1024 * 1024) { setNotice("El conjunto supera 180 MB. Divide la carga en dos trabajos."); return; }
     setProcessing(true);
     try {
       const create = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, studentName, currentCourse, targetCourse, theme }) });
       const created = await responseBody(create); if (!create.ok) throw new Error(created.error || "No se pudo crear el trabajo.");
       setActiveJob(created.job.id);
-      for (const [category, list] of groups) { for (const file of list) { const chunkSize = 4 * 1024 * 1024; const total = Math.ceil(file.size / chunkSize); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", category); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}” (parte ${index + 1}/${total}).`); setNotice(`Subiendo “${file.name}” · ${index + 1} de ${total}`); } } }
+      let completedFiles = 0;
+      const uploadOne = async ({ category, file }: { category: UploadKey; file: File }) => { const chunkSize = 4 * 1024 * 1024; const total = Math.ceil(file.size / chunkSize); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", category); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}” (parte ${index + 1}/${total}).`); } completedFiles += 1; setNotice(`Documentos subidos: ${completedFiles} de ${allSelected.length}`); };
+      const queue = [...allSelected];
+      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => { while (queue.length) { const next = queue.shift(); if (next) await uploadOne(next); } }));
       const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes, theme, duration }) });
       const generated = await responseBody(response); if (!response.ok) throw new Error(generated.error || "No se pudo generar la propuesta.");
       setResult(generated.result); setNotice("Propuesta generada y guardada correctamente."); await loadHistory();

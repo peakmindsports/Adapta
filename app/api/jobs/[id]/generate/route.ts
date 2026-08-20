@@ -23,7 +23,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const openAIFileIds: string[] = [];
   try {
     const content: any[] = [{ type: "input_text", text: job.kind === "adaptation" ? adaptationPrompt(job, body.notes || "") : projectPrompt(job, body.notes || "", body.theme || "", body.duration || "") }];
-    for (const row of fileRows.results.slice(0, 12)) {
+    for (const row of fileRows.results.slice(0, 36)) {
       let fileParts: ArrayBuffer[] = [];
       if (row.storage_key.startsWith("chunks:")) {
         const listed = await FILES.list({ prefix: row.storage_key.slice(7) });
@@ -41,7 +41,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       content.push({ type: "input_file", file_id: uploaded.id });
     }
     const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email = ?").bind(owner).first<{ model: string }>();
-    const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: setting?.model || OPENAI_MODEL || "gpt-5-mini", input: [{ role: "user", content }], max_output_tokens: 9000 }) });
+    const model = setting?.model || OPENAI_MODEL || "gpt-5-mini";
+    let finalContent = content;
+    if (openAIFileIds.length > 10) {
+      const summaries: string[] = [];
+      for (let index = 0; index < openAIFileIds.length; index += 8) {
+        const batch = openAIFileIds.slice(index, index + 8);
+        const batchContent = [{ type: "input_text", text: `Analiza estos documentos educativos (lote ${Math.floor(index / 8) + 1}). Resume de forma fiel: estructura de las unidades, contenidos, criterios, metodología, actividades, recursos, nivel de dificultad y elementos visuales. Conserva títulos y diferencias entre documentos. Este resumen se utilizará después para diseñar una propuesta curricular.` }, ...batch.map((fileId) => ({ type: "input_file", file_id: fileId }))];
+        const summaryResponse = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: [{ role: "user", content: batchContent }], max_output_tokens: 3500 }) });
+        const summaryData = await summaryResponse.json() as any;
+        if (!summaryResponse.ok) throw new Error(summaryData?.error?.message || "No se pudo analizar uno de los lotes de documentos.");
+        summaries.push(extractText(summaryData));
+      }
+      finalContent = [{ type: "input_text", text: `${content[0].text}\n\nANÁLISIS DE LOS DOCUMENTOS APORTADOS:\n${summaries.map((summary, index) => `\n--- LOTE ${index + 1} ---\n${summary}`).join("\n")}` }];
+    }
+    const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: [{ role: "user", content: finalContent }], max_output_tokens: 9000 }) });
     const data = await response.json() as any;
     if (!response.ok) throw new Error(data?.error?.message || "No se pudo generar la propuesta.");
     const result = extractText(data);
