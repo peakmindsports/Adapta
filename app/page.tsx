@@ -38,20 +38,26 @@ export default function Home() {
   const go = (next: View) => { setNotice(""); setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const loadHistory = async () => { const response = await fetch("/api/jobs"); if (response.ok) setHistory((await response.json()).jobs); };
   const openHistory = async () => { await loadHistory(); setShowHistory(true); };
+  const responseBody = async (response: Response) => {
+    const text = await response.text();
+    try { return JSON.parse(text); } catch { return { error: response.status === 413 ? "Los archivos son demasiado grandes. Cada archivo debe ocupar menos de 8 MB." : `El servidor no pudo procesar la solicitud (${response.status}).` }; }
+  };
   const generate = async (kind: "adaptation" | "project") => {
     setNotice(""); setResult("");
     if (kind === "adaptation" && (!studentName.trim() || !currentCourse || !targetCourse)) { setNotice("Completa el nombre, el curso actual y el nivel de adaptación."); return; }
     if (kind === "project" && !currentCourse) { setNotice("Selecciona el curso del proyecto."); return; }
     const groups: [UploadKey, File[]][] = kind === "adaptation" ? [["dictamen", files.dictamen], ["unidades", files.unidades], ["material", files.material]] : [["proyecto", files.proyecto]];
     if (!groups.some(([, list]) => list.length)) { setNotice("Añade al menos un documento antes de generar."); return; }
+    const oversized = groups.flatMap(([, list]) => list).find((file) => file.size > 8 * 1024 * 1024);
+    if (oversized) { setNotice(`“${oversized.name}” supera el límite de 8 MB. Comprímelo o divídelo antes de continuar.`); return; }
     setProcessing(true);
     try {
       const create = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, studentName, currentCourse, targetCourse, theme }) });
-      const created = await create.json(); if (!create.ok) throw new Error(created.error || "No se pudo crear el trabajo.");
+      const created = await responseBody(create); if (!create.ok) throw new Error(created.error || "No se pudo crear el trabajo.");
       setActiveJob(created.job.id);
-      for (const [category, list] of groups) { if (!list.length) continue; const form = new FormData(); form.append("category", category); list.forEach((file) => form.append("files", file)); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await upload.json(); if (!upload.ok) throw new Error(uploaded.error || "No se pudieron guardar los archivos."); }
+      for (const [category, list] of groups) { for (const file of list) { const form = new FormData(); form.append("category", category); form.append("files", file); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}”.`); } }
       const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes, theme, duration }) });
-      const generated = await response.json(); if (!response.ok) throw new Error(generated.error || "No se pudo generar la propuesta.");
+      const generated = await responseBody(response); if (!response.ok) throw new Error(generated.error || "No se pudo generar la propuesta.");
       setResult(generated.result); setNotice("Propuesta generada y guardada correctamente."); await loadHistory();
     } catch (error) { setNotice(error instanceof Error ? error.message : "Ha ocurrido un error inesperado."); } finally { setProcessing(false); setTimeout(() => document.querySelector(".result-panel, .success-note")?.scrollIntoView({ behavior: "smooth" }), 20); }
   };

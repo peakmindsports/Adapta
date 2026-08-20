@@ -20,15 +20,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const fileRows = await DB.prepare("SELECT filename, content_type, storage_key, category FROM job_files WHERE job_id = ? AND owner_email = ? ORDER BY created_at").bind(id, owner).all<Record<string, string>>();
   if (!fileRows.results.length) return jsonError("Añade al menos un documento antes de generar.");
   await DB.prepare("UPDATE jobs SET status = 'generating', error = NULL, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
+  const openAIFileIds: string[] = [];
   try {
     const content: any[] = [{ type: "input_text", text: job.kind === "adaptation" ? adaptationPrompt(job, body.notes || "") : projectPrompt(job, body.notes || "", body.theme || "", body.duration || "") }];
     for (const row of fileRows.results.slice(0, 12)) {
       const object = await FILES.get(row.storage_key);
       if (!object) continue;
-      const bytes = new Uint8Array(await object.arrayBuffer());
-      let binary = "";
-      for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-      content.push({ type: "input_file", filename: row.filename, file_data: `data:${row.content_type};base64,${btoa(binary)}` });
+      const uploadForm = new FormData();
+      uploadForm.append("purpose", "user_data");
+      uploadForm.append("file", new File([await object.arrayBuffer()], row.filename, { type: row.content_type }));
+      const uploadedResponse = await fetch("https://api.openai.com/v1/files", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, body: uploadForm });
+      const uploaded = await uploadedResponse.json() as any;
+      if (!uploadedResponse.ok || !uploaded.id) throw new Error(uploaded?.error?.message || `No se pudo preparar “${row.filename}” para el análisis.`);
+      openAIFileIds.push(uploaded.id);
+      content.push({ type: "input_file", file_id: uploaded.id });
     }
     const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: OPENAI_MODEL || "gpt-5-mini", input: [{ role: "user", content }], max_output_tokens: 9000 }) });
     const data = await response.json() as any;
@@ -41,5 +46,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const message = error instanceof Error ? error.message : "Error inesperado";
     await DB.prepare("UPDATE jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?").bind(message, Date.now(), id).run();
     return jsonError(message, 500);
+  } finally {
+    await Promise.allSettled(openAIFileIds.map((fileId) => fetch(`https://api.openai.com/v1/files/${fileId}`, { method: "DELETE", headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } })));
   }
 }

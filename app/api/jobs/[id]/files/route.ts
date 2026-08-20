@@ -10,9 +10,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const category = String(form.get("category") || "material");
   const incoming = form.getAll("files").filter((item): item is File => item instanceof File);
   if (!incoming.length) return jsonError("No se ha recibido ningún archivo.");
-  if (incoming.some((file) => file.size > 10 * 1024 * 1024)) return jsonError("Cada archivo debe ocupar menos de 10 MB.", 413);
-  const total = incoming.reduce((sum, file) => sum + file.size, 0);
-  if (total > 25 * 1024 * 1024) return jsonError("El conjunto de archivos debe ocupar menos de 25 MB.", 413);
+  if (incoming.length > 1) return jsonError("Envía los archivos de uno en uno.");
+  if (incoming.some((file) => file.size > 8 * 1024 * 1024)) return jsonError("Cada archivo debe ocupar menos de 8 MB.", 413);
   const saved = [];
   for (const file of incoming) {
     const fileId = crypto.randomUUID();
