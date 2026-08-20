@@ -17,7 +17,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const incoming = form.getAll("files").filter((item): item is File => item instanceof File);
   if (!incoming.length) return jsonError("No se ha recibido ningún archivo.");
   if (incoming.length > 1) return jsonError("Envía los archivos de uno en uno.");
-  if (incoming.some((file) => file.size > 5 * 1024 * 1024)) return jsonError("El fragmento supera el límite permitido.", 413);
+  if (incoming.some((file) => file.size > 1024 * 1024)) return jsonError("El fragmento supera el límite permitido.", 413);
   if (uploadId && Number.isInteger(chunkIndex) && Number.isInteger(chunkTotal)) {
     if (totalSize > 60 * 1024 * 1024) return jsonError("Cada documento debe ocupar menos de 60 MB.", 413);
     const file = incoming[0]; const prefix = `${owner}/${jobId}/chunks/${uploadId}/`; const key = `${prefix}${String(chunkIndex).padStart(4, "0")}`;
