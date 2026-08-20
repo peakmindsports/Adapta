@@ -24,18 +24,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const content: any[] = [{ type: "input_text", text: job.kind === "adaptation" ? adaptationPrompt(job, body.notes || "") : projectPrompt(job, body.notes || "", body.theme || "", body.duration || "") }];
     for (const row of fileRows.results.slice(0, 12)) {
-      const object = await FILES.get(row.storage_key);
-      if (!object) continue;
+      let fileParts: ArrayBuffer[] = [];
+      if (row.storage_key.startsWith("chunks:")) {
+        const listed = await FILES.list({ prefix: row.storage_key.slice(7) });
+        const objects = [...listed.objects].sort((a, b) => a.key.localeCompare(b.key));
+        for (const entry of objects) { const part = await FILES.get(entry.key); if (part) fileParts.push(await part.arrayBuffer()); }
+      } else { const object = await FILES.get(row.storage_key); if (object) fileParts = [await object.arrayBuffer()]; }
+      if (!fileParts.length) continue;
       const uploadForm = new FormData();
       uploadForm.append("purpose", "user_data");
-      uploadForm.append("file", new File([await object.arrayBuffer()], row.filename, { type: row.content_type }));
+      uploadForm.append("file", new File(fileParts, row.filename, { type: row.content_type }));
       const uploadedResponse = await fetch("https://api.openai.com/v1/files", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, body: uploadForm });
       const uploaded = await uploadedResponse.json() as any;
       if (!uploadedResponse.ok || !uploaded.id) throw new Error(uploaded?.error?.message || `No se pudo preparar “${row.filename}” para el análisis.`);
       openAIFileIds.push(uploaded.id);
       content.push({ type: "input_file", file_id: uploaded.id });
     }
-    const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: OPENAI_MODEL || "gpt-5-mini", input: [{ role: "user", content }], max_output_tokens: 9000 }) });
+    const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email = ?").bind(owner).first<{ model: string }>();
+    const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: setting?.model || OPENAI_MODEL || "gpt-5-mini", input: [{ role: "user", content }], max_output_tokens: 9000 }) });
     const data = await response.json() as any;
     if (!response.ok) throw new Error(data?.error?.message || "No se pudo generar la propuesta.");
     const result = extractText(data);

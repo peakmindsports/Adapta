@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 type View = "home" | "adaptacion" | "proyecto";
 type UploadKey = "dictamen" | "unidades" | "material" | "proyecto";
 type Job = { id: string; kind: string; title: string; status: string; createdAt: number; result?: string };
+type ApiModel = { id: string; label: string; cost: string; rank: number };
 const courses = ["1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO"];
 
 function UploadBox({ id, eyebrow, title, description, files, onFiles, optional = false }: { id: UploadKey; eyebrow: string; title: string; description: string; files: File[]; onFiles: (id: UploadKey, files: File[]) => void; optional?: boolean }) {
@@ -34,10 +35,17 @@ export default function Home() {
   const [activeJob, setActiveJob] = useState("");
   const [history, setHistory] = useState<Job[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [models, setModels] = useState<ApiModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [modelNote, setModelNote] = useState("");
+  const [adminStatus, setAdminStatus] = useState("");
   const addFiles = (key: UploadKey, incoming: File[]) => setFiles((current) => ({ ...current, [key]: [...current[key], ...incoming] }));
   const go = (next: View) => { setNotice(""); setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const loadHistory = async () => { const response = await fetch("/api/jobs"); if (response.ok) setHistory((await response.json()).jobs); };
   const openHistory = async () => { await loadHistory(); setShowHistory(true); };
+  const openAdmin = async () => { setShowAdmin(true); setAdminStatus("Consultando modelos disponibles…"); const response = await fetch("/api/admin/models"); const body = await responseBody(response); if (!response.ok) { setAdminStatus(body.error); return; } setModels(body.models); setSelectedModel(body.selected); setModelNote(body.note); setAdminStatus(""); };
+  const saveModel = async () => { setAdminStatus("Guardando…"); const response = await fetch("/api/admin/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: selectedModel }) }); const body = await responseBody(response); setAdminStatus(response.ok ? `Modelo activo: ${body.selected}` : body.error); };
   const responseBody = async (response: Response) => {
     const text = await response.text();
     try { return JSON.parse(text); } catch { return { error: response.status === 413 ? "Los archivos son demasiado grandes. Cada archivo debe ocupar menos de 8 MB." : `El servidor no pudo procesar la solicitud (${response.status}).` }; }
@@ -48,14 +56,14 @@ export default function Home() {
     if (kind === "project" && !currentCourse) { setNotice("Selecciona el curso del proyecto."); return; }
     const groups: [UploadKey, File[]][] = kind === "adaptation" ? [["dictamen", files.dictamen], ["unidades", files.unidades], ["material", files.material]] : [["proyecto", files.proyecto]];
     if (!groups.some(([, list]) => list.length)) { setNotice("Añade al menos un documento antes de generar."); return; }
-    const oversized = groups.flatMap(([, list]) => list).find((file) => file.size > 8 * 1024 * 1024);
-    if (oversized) { setNotice(`“${oversized.name}” supera el límite de 8 MB. Comprímelo o divídelo antes de continuar.`); return; }
+    const oversized = groups.flatMap(([, list]) => list).find((file) => file.size > 30 * 1024 * 1024);
+    if (oversized) { setNotice(`“${oversized.name}” supera el límite de 30 MB. Comprímelo o divídelo antes de continuar.`); return; }
     setProcessing(true);
     try {
       const create = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, studentName, currentCourse, targetCourse, theme }) });
       const created = await responseBody(create); if (!create.ok) throw new Error(created.error || "No se pudo crear el trabajo.");
       setActiveJob(created.job.id);
-      for (const [category, list] of groups) { for (const file of list) { const form = new FormData(); form.append("category", category); form.append("files", file); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}”.`); } }
+      for (const [category, list] of groups) { for (const file of list) { const chunkSize = 4 * 1024 * 1024; const total = Math.ceil(file.size / chunkSize); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", category); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}” (parte ${index + 1}/${total}).`); setNotice(`Subiendo “${file.name}” · ${index + 1} de ${total}`); } } }
       const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes, theme, duration }) });
       const generated = await responseBody(response); if (!response.ok) throw new Error(generated.error || "No se pudo generar la propuesta.");
       setResult(generated.result); setNotice("Propuesta generada y guardada correctamente."); await loadHistory();
@@ -66,7 +74,7 @@ export default function Home() {
     <header className="site-header">
       <button className="brand" onClick={() => go("home")} aria-label="Ir al inicio"><span className="brand-mark">A<span>+</span></span><span><strong>Adapta</strong><small>Docencia a medida</small></span></button>
       <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button></nav>
-      <button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button>
+      <div className="header-tools"><button className="admin-button" onClick={openAdmin}>⚙ Administrador</button><button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button></div>
     </header>
 
     {view === "home" && <div className="home-view">
@@ -106,6 +114,7 @@ export default function Home() {
       </div><aside className="project-output"><span className="output-tag">LA PROPUESTA INCLUIRÁ</span><h3>De las UDI a una experiencia compartida</h3><ul><li><i>01</i><div><strong>Hilo conductor</strong><p>Una narrativa que conecta todas las áreas.</p></div></li><li><i>02</i><div><strong>Producto final</strong><p>Un resultado auténtico para mostrar y celebrar.</p></div></li><li><i>03</i><div><strong>Dinámicas activas</strong><p>Retos, equipos, talleres y decisiones del alumnado.</p></div></li><li><i>04</i><div><strong>Participación familiar</strong><p>Propuestas concretas para sumar a las familias.</p></div></li><li><i>05</i><div><strong>Evaluación integrada</strong><p>Rúbrica y evidencias por áreas.</p></div></li></ul><blockquote>“Aprender deja de ser una suma de asignaturas y se convierte en una experiencia.”</blockquote></aside></div>
     </section>}
     {showHistory && <div className="history-overlay" onClick={() => setShowHistory(false)}><aside className="history-panel" onClick={(e) => e.stopPropagation()}><button className="history-close" onClick={() => setShowHistory(false)}>×</button><span className="section-kicker blue-ink">MI ESPACIO</span><h2>Trabajos guardados</h2><p>Consulta y descarga tus últimas propuestas.</p><div className="history-list">{history.length ? history.map((job) => <article key={job.id}><div><span>{job.kind === "adaptation" ? "ADAPTACIÓN" : "PROYECTO"}</span><strong>{job.title}</strong><small>{new Date(job.createdAt).toLocaleDateString("es-ES")} · {job.status === "completed" ? "Completado" : job.status}</small></div>{job.status === "completed" && <a href={`/api/jobs/${job.id}/download`}>Descargar</a>}</article>) : <div className="empty-history">Todavía no has generado ninguna propuesta.</div>}</div></aside></div>}
+    {showAdmin && <div className="history-overlay" onClick={() => setShowAdmin(false)}><aside className="history-panel admin-panel" onClick={(e) => e.stopPropagation()}><button className="history-close" onClick={() => setShowAdmin(false)}>×</button><span className="section-kicker coral-ink">ADMINISTRACIÓN</span><h2>Modelo de inteligencia artificial</h2><p>Elige el equilibrio entre coste y capacidad para las próximas generaciones.</p>{adminStatus && <div className="admin-status">{adminStatus}</div>}<div className="model-list">{models.map((model) => <label key={model.id} className={selectedModel === model.id ? "selected" : ""}><input type="radio" name="model" value={model.id} checked={selectedModel === model.id} onChange={() => setSelectedModel(model.id)} /><div><strong>{model.label}</strong><span>{model.cost}</span></div></label>)}</div>{modelNote && <p className="model-note">{modelNote}</p>}<button className="primary admin-save" disabled={!selectedModel} onClick={saveModel}>Guardar modelo</button></aside></div>}
     <footer><span className="brand-mark small">A<span>+</span></span><p>Adapta · Herramientas docentes para una escuela inclusiva</p><span>Hecho con cuidado para quienes enseñan</span></footer>
   </main>;
 }

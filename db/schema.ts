@@ -26,3 +26,9 @@ export const jobFiles = sqliteTable("job_files", {
   size: integer("size").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+export const userSettings = sqliteTable("user_settings", {
+  ownerEmail: text("owner_email").primaryKey(),
+  model: text("model").notNull().default("gpt-5-mini"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
