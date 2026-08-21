@@ -57,8 +57,44 @@ function studentSafeMarkdown(markdown: string) {
     .replace(/\n{3,}/g, "\n\n");
 }
 
+type DownloadScope = "all" | "student" | "teacher";
+
+function audienceSections(markdown: string) {
+  const annex = markdown.match(/^# Anexo exclusivo para el profesorado\s*$/im);
+  if (annex?.index !== undefined) return { student: markdown.slice(0, annex.index).trim(), teacher: markdown.slice(annex.index).trim() };
+  const units = [...markdown.matchAll(/^# Unidad\s+(\d+)\s*:\s*(.+)$/gim)];
+  if (!units.length) return { student: markdown, teacher: "" };
+  const preamble = markdown.slice(0, units[0].index).trim(); const studentUnits: string[] = []; const teacherUnits: string[] = [];
+  units.forEach((unit, index) => {
+    const chapter = markdown.slice(unit.index, units[index + 1]?.index ?? markdown.length).replace(/^\s*---\s*$/gm, "").trim();
+    const marker = chapter.match(/^(?:<!--\s*INICIO_DOCENTE\s*-->|#{2,3}\s+(?:Material exclusivo para el profesorado|Indicadores? de evaluaci[oó]n|R[uú]brica(?: de la unidad)?|Lista de control|Prueba escrita(?: para el profesorado)?|Solucionario docente|Gu[ií]a docente).*)$/im);
+    if (!marker?.index) { studentUnits.push(chapter); return; }
+    studentUnits.push(chapter.slice(0, marker.index).trim());
+    const teacherBody = chapter.slice(marker.index).replace(/<!--\s*(?:INICIO|FIN)_DOCENTE\s*-->/gi, "").trim();
+    teacherUnits.push(`## Unidad ${unit[1]} · ${unit[2].trim()}\n\n${teacherBody}`);
+  });
+  const teacher = teacherUnits.length ? `# Anexo exclusivo para el profesorado\n\nEste bloque reúne los instrumentos de evaluación, registros, pruebas y solucionarios. No forma parte del material entregable al alumnado.\n\n${teacherUnits.join("\n\n---\n\n")}` : "";
+  return { student: `${preamble}\n\n${studentUnits.join("\n\n---\n\n")}`.trim(), teacher };
+}
+
+function selectTeacherUnits(markdown: string, requested: number[]) {
+  if (!requested.length || !markdown) return markdown;
+  const units = [...markdown.matchAll(/^## Unidad\s+(\d+)\s*[·:]\s*.+$/gim)];
+  if (!units.length) return markdown;
+  const preamble = markdown.slice(0, units[0].index).trim();
+  const chosen = units.map((unit, index) => ({ number: Number(unit[1]), text: markdown.slice(unit.index, units[index + 1]?.index ?? markdown.length).replace(/^\s*---\s*$/gm, "").trim() })).filter((unit) => requested.includes(unit.number));
+  return chosen.length ? `${preamble}\n\n${chosen.map((unit) => unit.text).join("\n\n---\n\n")}` : markdown;
+}
+
+function resourceForScope(markdown: string, requested: number[], scope: DownloadScope) {
+  const sections = audienceSections(markdown); const student = selectUnits(sections.student, requested); const teacher = selectTeacherUnits(sections.teacher, requested);
+  if (scope === "student") return student;
+  if (scope === "teacher") return teacher || "# Material exclusivo para el profesorado\n\nEste recurso no contiene todavía un bloque docente identificado.";
+  return teacher ? `${student}\n\n---\n\n${teacher}` : student;
+}
+
 async function makeWord(title: string, markdown: string, images: Array<SourceImage | null>) {
-  const children: Paragraph[] = [new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 240 } }), new Paragraph({ children: [new TextRun({ text: "Libro adaptado", color: "277F91", size: 24 })], spacing: { after: 360 } })];
+  const children: Paragraph[] = [new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 240 } }), new Paragraph({ children: [new TextRun({ text: "Recurso adaptado", color: "277F91", size: 24 })], spacing: { after: 360 } })];
   let firstHeading = true;
   let imageIndex = 0;
   for (const block of parseMarkdown(markdown)) {
@@ -102,7 +138,7 @@ async function makePdf(title: string, markdown: string, images: Array<SourceImag
     if (y - lines.length * lineHeight < margin + 28) addPage();
     for (const line of lines) { page.drawText(line, { x: margin + indent, y, size, font, color }); y -= lineHeight; } y -= gap;
   };
-  draw(title, 24, true, rgb(0.94, 0.34, 0.25), 0, 7); draw("Libro adaptado", 12, true, rgb(0.15, 0.5, 0.57), 0, 22);
+  draw(title, 24, true, rgb(0.94, 0.34, 0.25), 0, 7); draw("Recurso adaptado", 12, true, rgb(0.15, 0.5, 0.57), 0, 22);
   let firstHeading = true; let imageIndex = 0;
   for (const block of parseMarkdown(markdown)) {
     if (block.type === "break") { if (y < pageSize[1] - margin - 20) addPage(); continue; }
@@ -179,9 +215,9 @@ async function sourceImages(jobId: string, owner: string, requested: number[] = 
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request);
-  const job = await runtime().DB.prepare("SELECT title, result FROM jobs WHERE id = ? AND owner_email = ? AND status = 'completed'").bind(id, owner).first<{ title: string; result: string }>();
+  const job = await runtime().DB.prepare("SELECT title, result, kind FROM jobs WHERE id = ? AND owner_email = ? AND status = 'completed'").bind(id, owner).first<{ title: string; result: string; kind: string }>();
   if (!job?.result) return jsonError("El documento aún no está disponible.", 404);
-  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const result = studentSafeMarkdown(selectUnits(repairIndex(job.result), requested)); const suffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const filename = `${safeFilename(job.title)}${suffix}`; const images = await sourceImages(id, owner, requested, requiredImages(result));
+  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const scopeValue = url.searchParams.get("scope"); const scope: DownloadScope = scopeValue === "student" || scopeValue === "teacher" ? scopeValue : "all"; const repaired = repairIndex(job.result); const scoped = job.kind === "adaptation" ? resourceForScope(repaired, requested, scope) : selectUnits(repaired, requested); const result = studentSafeMarkdown(scoped); const unitSuffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const scopeSuffix = job.kind === "adaptation" ? scope === "student" ? "-Alumnado" : scope === "teacher" ? "-Docente" : "-Completo" : ""; const filename = `${safeFilename(job.title)}${unitSuffix}${scopeSuffix}`; const images = await sourceImages(id, owner, requested, requiredImages(result));
   if (format === "docx") { const blob = await makeWord(job.title, result, images); return new Response(blob, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename}.docx"`, "Cache-Control": "private, no-store" } }); }
   const bytes = await makePdf(job.title, result, images); const body = bytes.slice().buffer as ArrayBuffer;
   return new Response(body, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"`, "Cache-Control": "private, no-store" } });
