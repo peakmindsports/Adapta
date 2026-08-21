@@ -10,7 +10,7 @@ type StudentContext = { strengths: string; classroomContext: string; familyConte
 type BatchStudent = { id: string; name: string; currentCourse: string; targetCourse: string; reports: File[]; levelMaterial: File[]; context: StudentContext; assessing: boolean; recommendation?: string };
 const emptyStudentContext = (): StudentContext => ({ strengths: "", classroomContext: "", familyContext: "", effectiveSupports: "", notes: "" });
 const newBatchStudent = (): BatchStudent => ({ id: crypto.randomUUID(), name: "", currentCourse: "", targetCourse: "", reports: [], levelMaterial: [], context: emptyStudentContext(), assessing: false });
-const courses = ["1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO"];
+const courses = ["1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO", "3º de ESO", "4º de ESO"];
 const subjects = ["Matemáticas", "Lengua Castellana", "Conocimiento del Medio", "Inglés", "Educación Artística", "Educación Física", "Otra"];
 const today = new Date();
 const schoolYearStart = today.getMonth() >= 7 ? today.getFullYear() : today.getFullYear() - 1;
