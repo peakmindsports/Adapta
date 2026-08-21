@@ -41,6 +41,8 @@ export default function Home() {
   const [theme, setTheme] = useState("");
   const [duration, setDuration] = useState("");
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState("");
   const [result, setResult] = useState("");
   const [activeJob, setActiveJob] = useState("");
   const [history, setHistory] = useState<Job[]>([]);
@@ -57,7 +59,7 @@ export default function Home() {
   const [projectSubject, setProjectSubject] = useState<"project_math" | "project_language" | "project_science" | "project_english">("project_math");
   const [recommendation, setRecommendation] = useState<{ recommendedCourse: string; explanation: string; confidence: string; caveat: string } | null>(null);
   const addFiles = (key: UploadKey, incoming: File[]) => setFiles((current) => ({ ...current, [key]: [...current[key], ...incoming] }));
-  const go = (next: View) => { setNotice(""); setResult(""); setActiveJob(""); setAdaptedProject(null); setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const go = (next: View) => { setNotice(""); setResult(""); setActiveJob(""); setAdaptedProject(null); setProgress(0); setProgressLabel(""); setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const loadHistory = async () => { const response = await fetch("/api/jobs"); if (response.ok) setHistory((await response.json()).jobs); };
   const openHistory = async () => { await loadHistory(); setShowHistory(true); };
   const openAdmin = async () => { setShowAdmin(true); setAdminStatus("Consultando modelos disponibles…"); const response = await fetch("/api/admin/models"); const body = await responseBody(response); if (!response.ok) { setAdminStatus(body.error); return; } setModels(body.models); setSelectedModel(body.selected); setModelNote(body.note); setAdminStatus(""); };
@@ -81,7 +83,7 @@ export default function Home() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo estimar el nivel."); } finally { setAssessing(false); }
   };
   const generate = async (kind: "adaptation" | "project") => {
-    setNotice(""); setResult(""); setAdaptedProject(null);
+    setNotice(""); setResult(""); setAdaptedProject(null); setProgress(0); setProgressLabel("");
     if (kind === "adaptation" && (!studentName.trim() || !currentCourse || !targetCourse)) { setNotice("Completa el nombre, el curso actual y el nivel de adaptación."); return; }
     if (kind === "project" && !currentCourse) { setNotice("Selecciona el curso del proyecto."); return; }
     const groups: [UploadKey, File[]][] = kind === "adaptation" ? [["dictamen", files.dictamen], ["programacion", files.programacion], ["criterios", files.criterios], ["unidades", files.unidades], ["material", files.material]] : projectSubjects.flatMap((subject) => [[subject.id, files[subject.id]], [subject.criteriaId, files[subject.criteriaId]]] as [UploadKey, File[]][]);
@@ -91,19 +93,22 @@ export default function Home() {
     const totalBytes = allSelected.reduce((sum, { file }) => sum + file.size, 0);
     if (oversized) { setNotice(`“${oversized.file.name}” supera el límite de 60 MB por documento.`); return; }
     if (totalBytes > 180 * 1024 * 1024) { setNotice("El conjunto supera 180 MB. Divide la carga en dos trabajos."); return; }
-    setProcessing(true);
+    setProcessing(true); setProgress(2); setProgressLabel("Preparando el trabajo…");
+    let generationTimer: ReturnType<typeof setInterval> | undefined;
     try {
       const create = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, studentName, currentCourse, targetCourse, theme }) });
       const created = await responseBody(create); if (!create.ok) throw new Error(created.error || "No se pudo crear el trabajo.");
       setActiveJob(created.job.id);
-      let completedFiles = 0;
-      const uploadOne = async ({ category, file }: { category: UploadKey; file: File }) => { const chunkSize = 768 * 1024; const total = Math.ceil(file.size / chunkSize); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", category); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}” (parte ${index + 1}/${total}).`); } completedFiles += 1; setNotice(`Documentos subidos: ${completedFiles} de ${allSelected.length}`); };
+      let completedFiles = 0; let uploadedChunks = 0; const chunkSize = 768 * 1024; const totalChunks = allSelected.reduce((sum, item) => sum + Math.ceil(item.file.size / chunkSize), 0);
+      const uploadOne = async ({ category, file }: { category: UploadKey; file: File }) => { const total = Math.ceil(file.size / chunkSize); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", category); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}” (parte ${index + 1}/${total}).`); uploadedChunks += 1; setProgress(Math.min(52, 3 + Math.round((uploadedChunks / totalChunks) * 49))); setProgressLabel(`Subiendo documentos · ${completedFiles + 1} de ${allSelected.length}`); } completedFiles += 1; setNotice(`Documentos subidos: ${completedFiles} de ${allSelected.length}`); };
       const queue = [...allSelected];
       await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => { while (queue.length) { const next = queue.shift(); if (next) await uploadOne(next); } }));
+      setProgress(56); setProgressLabel(kind === "adaptation" ? "Analizando las UDI y los criterios…" : "Analizando las áreas y sus criterios…");
+      generationTimer = setInterval(() => setProgress((value) => Math.min(94, value + (value < 75 ? 2 : 1))), 1800);
       const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes, theme, duration, studentContext: { strengths, classroomContext, familyContext, effectiveSupports } }) });
       const generated = await responseBody(response); if (!response.ok) throw new Error(generated.error || "No se pudo generar la propuesta.");
-      setResult(generated.result); setNotice("Propuesta generada y guardada correctamente."); await loadHistory();
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Ha ocurrido un error inesperado."); } finally { setProcessing(false); setTimeout(() => document.querySelector(".result-panel, .success-note")?.scrollIntoView({ behavior: "smooth" }), 20); }
+      if (generationTimer) clearInterval(generationTimer); setProgress(100); setProgressLabel(kind === "adaptation" ? "Libro completado y guardado" : "Proyecto completado y guardado"); setResult(generated.result); setNotice("Propuesta generada y guardada correctamente."); await loadHistory();
+    } catch (error) { setProgressLabel("El proceso se ha detenido"); setNotice(error instanceof Error ? error.message : "Ha ocurrido un error inesperado."); } finally { if (generationTimer) clearInterval(generationTimer); setProcessing(false); setTimeout(() => document.querySelector(".result-panel, .success-note")?.scrollIntoView({ behavior: "smooth" }), 20); }
   };
   const adaptProject = async () => {
     if (!activeJob || !result) { setNotice("Primero genera el proyecto interdisciplinar."); return; }
@@ -120,6 +125,7 @@ export default function Home() {
       <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button></nav>
       <div className="header-tools"><button className="admin-button" onClick={openAdmin}>⚙ Administrador</button><button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button></div>
     </header>
+    {progress > 0 && <GenerationProgress value={progress} label={progressLabel} active={processing} />}
 
     {view === "home" && <div className="home-view">
       <section className="hero">
@@ -174,6 +180,10 @@ function ResultPanel({ result, jobId }: { result: string; jobId: string }) {
   const selectedQuery = selectedUnits.length ? `&units=${selectedUnits.join(",")}` : "";
   const toggleUnit = (number: number) => setSelectedUnits((current) => current.includes(number) ? current.filter((item) => item !== number) : [...current, number].sort((a, b) => a - b));
   return <section className="result-panel"><div><span>PROPUESTA GENERADA</span><h2>Tu documento está listo</h2><small className="student-privacy-note">🔒 El nivel competencial solo es visible aquí. No aparecerá en los archivos entregables.</small></div><div className="result-downloads"><a href={`/api/jobs/${jobId}/download?format=pdf`}>PDF completo ↓</a><a href={`/api/jobs/${jobId}/download?format=docx`}>Word completo ↓</a></div>{units.length > 1 && <details className="unit-download-picker"><summary>Descargar unidades concretas</summary><p>Marca una o varias UDI para crear un documento independiente con esa selección.</p><div className="unit-checks">{units.map((unit) => <label key={unit.number}><input type="checkbox" checked={selectedUnits.includes(unit.number)} onChange={() => toggleUnit(unit.number)} /><span><b>UDI {unit.number}</b>{unit.title}</span></label>)}</div><div className="unit-selection-actions"><button type="button" onClick={() => setSelectedUnits(units.map((unit) => unit.number))}>Seleccionar todas</button><button type="button" onClick={() => setSelectedUnits([])}>Limpiar</button>{selectedUnits.length > 0 && <><a href={`/api/jobs/${jobId}/download?format=pdf${selectedQuery}`}>PDF de la selección ↓</a><a href={`/api/jobs/${jobId}/download?format=docx${selectedQuery}`}>Word de la selección ↓</a></>}</div></details>}<pre>{result}</pre></section>;
+}
+
+function GenerationProgress({ value, label, active }: { value: number; label: string; active: boolean }) {
+  return <section className={`generation-progress ${active ? "active" : "complete"}`} aria-live="polite" aria-label={`Progreso de generación: ${value}%`}><div><span>{active ? "CREANDO DOCUMENTO" : "PROCESO COMPLETADO"}</span><strong>{label}</strong></div><b>{value}%</b><div className="progress-track"><i style={{ width: `${value}%` }} /></div><small>{value < 53 ? "Estamos guardando los documentos de forma segura." : value < 95 ? "La IA está trabajando documento a documento. Puedes mantener esta pestaña abierta." : "Preparando el resultado y las descargas."}</small></section>;
 }
 
 const phraseDefaults: Record<string, string[]> = {
