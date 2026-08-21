@@ -5,6 +5,7 @@ import { ensureSchema, jsonError, ownerFrom, runtime, safeFilename } from "../..
 
 type Block = { type: "heading" | "bullet" | "checkbox" | "number" | "paragraph" | "tableRow" | "card" | "break" | "image" | "match"; text: string; second?: string; level?: number };
 type SourceImage = { bytes: Uint8Array; width: number; height: number; type: "jpg" | "png" };
+type CoverDetails = { subject?: string | null; student?: string | null; course?: string | null; academicYear?: string | null };
 
 function cleanMarkdown(value: string) {
   return value.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/__([^_]+)__/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/^>\s?/, "").trim();
@@ -93,8 +94,9 @@ function resourceForScope(markdown: string, requested: number[], scope: Download
   return teacher ? `${student}\n\n---\n\n${teacher}` : student;
 }
 
-async function makeWord(title: string, markdown: string, images: Array<SourceImage | null>) {
-  const children: Paragraph[] = [new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 240 } }), new Paragraph({ children: [new TextRun({ text: "Recurso adaptado", color: "277F91", size: 24 })], spacing: { after: 360 } })];
+async function makeWord(title: string, markdown: string, images: Array<SourceImage | null>, cover: CoverDetails, coverImage: SourceImage) {
+  const coverScale = Math.min(430 / coverImage.width, 430 / coverImage.height, 1);
+  const children: Paragraph[] = [new Paragraph({ children: [new TextRun({ text: "ADAPTA  ·  RECURSO EDUCATIVO", bold: true, color: "277F91", size: 18, characterSpacing: 40 })], spacing: { before: 300, after: 260 } }), new Paragraph({ children: [new TextRun({ text: cover.subject || "Mi recurso anual", bold: true, color: "172B30", size: 48 })], spacing: { after: 120 } }), new Paragraph({ children: [new TextRun({ text: "Aprendo a mi manera", italics: true, color: "EF6E57", size: 28 })], spacing: { after: 280 } }), new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ type: coverImage.type, data: coverImage.bytes, transformation: { width: Math.round(coverImage.width * coverScale), height: Math.round(coverImage.height * coverScale) } })], spacing: { after: 260 } }), new Paragraph({ children: [new TextRun({ text: cover.student || title, bold: true, size: 26, color: "172B30" }), new TextRun({ break: 1, text: [cover.course, cover.academicYear].filter(Boolean).join("  ·  "), size: 20, color: "587075" })], shading: { fill: "EDF7F4" }, border: { left: { color: "277F91", style: "single", size: 18 } }, spacing: { before: 100, after: 200 }, indent: { left: 220 } }), new Paragraph({ children: [new PageBreak()] }), new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 240 } }), new Paragraph({ children: [new TextRun({ text: "Recurso adaptado", color: "277F91", size: 24 })], spacing: { after: 360 } })];
   let firstHeading = true;
   let imageIndex = 0;
   for (const block of parseMarkdown(markdown)) {
@@ -129,7 +131,7 @@ function wrapText(text: string, maxWidth: number, size: number, font: { widthOfT
   if (current) lines.push(current); return lines.length ? lines : [""];
 }
 
-async function makePdf(title: string, markdown: string, images: Array<SourceImage | null>) {
+async function makePdf(title: string, markdown: string, images: Array<SourceImage | null>, cover: CoverDetails, coverImage: SourceImage) {
   const pdf = await PDFDocument.create(); const regular = await pdf.embedFont(StandardFonts.Helvetica); const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const pageSize: [number, number] = [595.28, 841.89]; const margin = 54; let page = pdf.addPage(pageSize); let y = pageSize[1] - margin;
   const addPage = () => { page = pdf.addPage(pageSize); y = pageSize[1] - margin; };
@@ -138,7 +140,13 @@ async function makePdf(title: string, markdown: string, images: Array<SourceImag
     if (y - lines.length * lineHeight < margin + 28) addPage();
     for (const line of lines) { page.drawText(line, { x: margin + indent, y, size, font, color }); y -= lineHeight; } y -= gap;
   };
-  draw(title, 24, true, rgb(0.94, 0.34, 0.25), 0, 7); draw("Recurso adaptado", 12, true, rgb(0.15, 0.5, 0.57), 0, 22);
+  page.drawRectangle({ x: 0, y: 0, width: pageSize[0], height: pageSize[1], color: rgb(1, .98, .93) }); page.drawRectangle({ x: 0, y: 0, width: 18, height: pageSize[1], color: rgb(.15, .5, .57) }); page.drawCircle({ x: 550, y: 790, size: 72, color: rgb(.94, .43, .34), opacity: .9 });
+  page.drawText("ADAPTA  ·  RECURSO EDUCATIVO", { x: 48, y: 785, size: 10, font: bold, color: rgb(.15, .5, .57) });
+  const coverTitle = pdfSafe(cover.subject || "Mi recurso anual"); wrapText(coverTitle, 470, 30, bold).slice(0, 2).forEach((line, index) => page.drawText(line, { x: 48, y: 742 - index * 36, size: 30, font: bold, color: rgb(.09, .17, .19) }));
+  page.drawText("Aprendo a mi manera", { x: 48, y: 662, size: 17, font: bold, color: rgb(.94, .34, .25) });
+  const coverEmbedded = coverImage.type === "png" ? await pdf.embedPng(coverImage.bytes) : await pdf.embedJpg(coverImage.bytes); const coverScale = Math.min(470 / coverEmbedded.width, 405 / coverEmbedded.height); const coverWidth = coverEmbedded.width * coverScale; const coverHeight = coverEmbedded.height * coverScale; page.drawRectangle({ x: (pageSize[0] - coverWidth) / 2 - 7, y: 222 - 7, width: coverWidth + 14, height: coverHeight + 14, color: rgb(1, 1, 1), borderColor: rgb(.82, .73, .59), borderWidth: 1 }); page.drawImage(coverEmbedded, { x: (pageSize[0] - coverWidth) / 2, y: 222, width: coverWidth, height: coverHeight });
+  page.drawRectangle({ x: 42, y: 65, width: 511, height: 112, color: rgb(.93, .97, .95) }); page.drawRectangle({ x: 42, y: 65, width: 7, height: 112, color: rgb(.15, .5, .57) }); page.drawText(pdfSafe(cover.student || title), { x: 65, y: 128, size: 15, font: bold, color: rgb(.09, .17, .19), maxWidth: 460 }); page.drawText(pdfSafe([cover.course, cover.academicYear].filter(Boolean).join("  ·  ")), { x: 65, y: 96, size: 10, font: regular, color: rgb(.33, .44, .46) });
+  addPage(); draw(title, 24, true, rgb(0.94, 0.34, 0.25), 0, 7); draw("Recurso adaptado", 12, true, rgb(0.15, 0.5, 0.57), 0, 22);
   let firstHeading = true; let imageIndex = 0;
   for (const block of parseMarkdown(markdown)) {
     if (block.type === "break") { if (y < pageSize[1] - margin - 20) addPage(); continue; }
@@ -215,10 +223,10 @@ async function sourceImages(jobId: string, owner: string, requested: number[] = 
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request);
-  const job = await runtime().DB.prepare("SELECT title, result, kind FROM jobs WHERE id = ? AND owner_email = ? AND status = 'completed'").bind(id, owner).first<{ title: string; result: string; kind: string }>();
+  const job = await runtime().DB.prepare("SELECT title, result, kind, student_name AS student, current_course AS course, subject, academic_year AS academicYear FROM jobs WHERE id = ? AND owner_email = ? AND status = 'completed'").bind(id, owner).first<{ title: string; result: string; kind: string; student?: string; course?: string; subject?: string; academicYear?: string }>();
   if (!job?.result) return jsonError("El documento aún no está disponible.", 404);
-  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const scopeValue = url.searchParams.get("scope"); const scope: DownloadScope = scopeValue === "student" || scopeValue === "teacher" ? scopeValue : "all"; const repaired = repairIndex(job.result); const scoped = job.kind === "adaptation" ? resourceForScope(repaired, requested, scope) : selectUnits(repaired, requested); const result = studentSafeMarkdown(scoped); const unitSuffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const scopeSuffix = job.kind === "adaptation" ? scope === "student" ? "-Alumnado" : scope === "teacher" ? "-Docente" : "-Completo" : ""; const filename = `${safeFilename(job.title)}${unitSuffix}${scopeSuffix}`; const images = await sourceImages(id, owner, requested, requiredImages(result));
-  if (format === "docx") { const blob = await makeWord(job.title, result, images); return new Response(blob, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename}.docx"`, "Cache-Control": "private, no-store" } }); }
-  const bytes = await makePdf(job.title, result, images); const body = bytes.slice().buffer as ArrayBuffer;
+  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const scopeValue = url.searchParams.get("scope"); const scope: DownloadScope = scopeValue === "student" || scopeValue === "teacher" ? scopeValue : "all"; const repaired = repairIndex(job.result); const scoped = job.kind === "adaptation" ? resourceForScope(repaired, requested, scope) : selectUnits(repaired, requested); const result = studentSafeMarkdown(scoped); const unitSuffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const scopeSuffix = job.kind === "adaptation" ? scope === "student" ? "-Alumnado" : scope === "teacher" ? "-Docente" : "-Completo" : ""; const filename = `${safeFilename(job.title)}${unitSuffix}${scopeSuffix}`; const images = await sourceImages(id, owner, requested, requiredImages(result)); let coverImage = images.find((image): image is SourceImage => Boolean(image)); if (!coverImage) { const fallback = await fetch(new URL("/resource-cover.png", request.url)); coverImage = { bytes: new Uint8Array(await fallback.arrayBuffer()), width: 1024, height: 1536, type: "png" }; } const cover = { subject: job.subject, student: job.student, course: job.course, academicYear: job.academicYear };
+  if (format === "docx") { const blob = await makeWord(job.title, result, images, cover, coverImage); return new Response(blob, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename}.docx"`, "Cache-Control": "private, no-store" } }); }
+  const bytes = await makePdf(job.title, result, images, cover, coverImage); const body = bytes.slice().buffer as ArrayBuffer;
   return new Response(body, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"`, "Cache-Control": "private, no-store" } });
 }
