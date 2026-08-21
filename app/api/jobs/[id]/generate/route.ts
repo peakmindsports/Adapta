@@ -44,7 +44,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       content.push({ type: "input_file", file_id: uploaded.id });
     }
     if (job.kind === "project") {
-      const subjectNames: Record<string, string> = { project_criteria: "SELECCIÓN PRIORITARIA DE CRITERIOS", project_math: "Matemáticas", project_language: "Lengua", project_science: "Conocimiento del Medio", project_english: "Inglés", proyecto: "Área sin clasificar" };
+      const subjectNames: Record<string, string> = { project_math_criteria: "SELECCIÓN PRIORITARIA DE CRITERIOS · Matemáticas · todas las UDI", project_language_criteria: "SELECCIÓN PRIORITARIA DE CRITERIOS · Lengua · todas las UDI", project_science_criteria: "SELECCIÓN PRIORITARIA DE CRITERIOS · Conocimiento del Medio · todas las UDI", project_english_criteria: "SELECCIÓN PRIORITARIA DE CRITERIOS · Inglés · todas las UDI", project_math: "Matemáticas", project_language: "Lengua", project_science: "Conocimiento del Medio", project_english: "Inglés", proyecto: "Área sin clasificar" };
       content[0].text += `\n\nDOCUMENTOS CLASIFICADOS POR EL EQUIPO DOCENTE:\n${preparedFiles.map((file) => `- ${subjectNames[file.category] || file.category}: ${file.filename}`).join("\n")}\nRespeta esta clasificación. Si hay documentos de SELECCIÓN PRIORITARIA DE CRITERIOS, utilízalos como decisión principal: el producto final, las actividades y los instrumentos deben obtener evidencias de esos criterios, sin añadir otros como objeto de calificación. Crea una matriz «área → unidad de origen → criterio seleccionado → evidencia → instrumento → momento».`;
     }
     const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email = ?").bind(owner).first<{ model: string }>();
