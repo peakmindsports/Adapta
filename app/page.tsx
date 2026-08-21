@@ -28,6 +28,7 @@ function UploadBox({ id, eyebrow, title, description, files, onFiles, optional =
 
 export default function Home() {
   const [view, setView] = useState<View>("home");
+  const viewRef = useRef<View>("home");
   const [files, setFiles] = useState<Record<UploadKey, File[]>>({ dictamen: [], programacion: [], criterios: [], unidades: [], material: [], proyecto: [], project_math: [], project_math_criteria: [], project_language: [], project_language_criteria: [], project_science: [], project_science_criteria: [], project_english: [], project_english_criteria: [] });
   const [notice, setNotice] = useState("");
   const [studentName, setStudentName] = useState("");
@@ -59,7 +60,7 @@ export default function Home() {
   const [projectSubject, setProjectSubject] = useState<"project_math" | "project_language" | "project_science" | "project_english">("project_math");
   const [recommendation, setRecommendation] = useState<{ recommendedCourse: string; explanation: string; confidence: string; caveat: string } | null>(null);
   const addFiles = (key: UploadKey, incoming: File[]) => setFiles((current) => ({ ...current, [key]: [...current[key], ...incoming] }));
-  const go = (next: View) => { setNotice(""); setResult(""); setActiveJob(""); setAdaptedProject(null); setProgress(0); setProgressLabel(""); setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const go = (next: View) => { setNotice(""); if (!processing) { setResult(""); setActiveJob(""); setAdaptedProject(null); setProgress(0); setProgressLabel(""); } viewRef.current = next; setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const loadHistory = async () => { const response = await fetch("/api/jobs"); if (response.ok) setHistory((await response.json()).jobs); };
   const openHistory = async () => { await loadHistory(); setShowHistory(true); };
   const openAdmin = async () => { setShowAdmin(true); setAdminStatus("Consultando modelos disponibles…"); const response = await fetch("/api/admin/models"); const body = await responseBody(response); if (!response.ok) { setAdminStatus(body.error); return; } setModels(body.models); setSelectedModel(body.selected); setModelNote(body.note); setAdminStatus(""); };
@@ -107,7 +108,7 @@ export default function Home() {
       generationTimer = setInterval(() => setProgress((value) => Math.min(94, value + (value < 75 ? 2 : 1))), 1800);
       const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes, theme, duration, studentContext: { strengths, classroomContext, familyContext, effectiveSupports } }) });
       const generated = await responseBody(response); if (!response.ok) throw new Error(generated.error || "No se pudo generar la propuesta.");
-      if (generationTimer) clearInterval(generationTimer); setProgress(100); setProgressLabel(kind === "adaptation" ? "Libro completado y guardado" : "Proyecto completado y guardado"); setResult(generated.result); setNotice("Propuesta generada y guardada correctamente."); await loadHistory();
+      if (generationTimer) clearInterval(generationTimer); setProgress(100); setProgressLabel(kind === "adaptation" ? "Libro completado y guardado · disponible en Adaptaciones y Mi historial" : "Proyecto completado y guardado · disponible en Proyectos y Mi historial"); if (viewRef.current === (kind === "adaptation" ? "adaptacion" : "proyecto")) setResult(generated.result); else setResult(""); setNotice(kind === "adaptation" ? "Libro generado y guardado correctamente en Mi historial." : "Proyecto generado y guardado correctamente en Mi historial."); await loadHistory();
     } catch (error) { setProgressLabel("El proceso se ha detenido"); setNotice(error instanceof Error ? error.message : "Ha ocurrido un error inesperado."); } finally { if (generationTimer) clearInterval(generationTimer); setProcessing(false); setTimeout(() => document.querySelector(".result-panel, .success-note")?.scrollIntoView({ behavior: "smooth" }), 20); }
   };
   const adaptProject = async () => {
