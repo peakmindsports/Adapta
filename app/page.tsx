@@ -91,6 +91,7 @@ export default function Home() {
   const [history, setHistory] = useState<Job[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [deletingJob, setDeletingJob] = useState("");
+  const [deletingHistory, setDeletingHistory] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
   const [historyKind, setHistoryKind] = useState("");
   const [historySubject, setHistorySubject] = useState("");
@@ -128,6 +129,12 @@ export default function Home() {
   const deleteJob = async (job: Job) => {
     if (!window.confirm(`¿Eliminar definitivamente “${job.title}” y sus documentos asociados? Esta acción no se puede deshacer.`)) return;
     setDeletingJob(job.id); const response = await fetch(`/api/jobs/${job.id}`, { method: "DELETE" }); const body = await responseBody(response); if (response.ok) { setHistory((jobs) => jobs.filter((item) => item.id !== job.id)); if (activeJob === job.id) { setActiveJob(""); setResult(""); } } else window.alert(body.error || "No se pudo eliminar el trabajo."); setDeletingJob("");
+  };
+  const deleteAllHistory = async () => {
+    if (!history.length || !window.confirm(`¿Eliminar definitivamente los ${history.length} trabajos del historial y todos sus documentos asociados? Esta acción no se puede deshacer.`)) return;
+    setDeletingHistory(true); const response = await fetch("/api/jobs", { method: "DELETE" }); const body = await responseBody(response);
+    if (response.ok) { setHistory([]); setActiveJob(""); setResult(""); setAdaptedProject(null); } else window.alert(body.error || "No se pudo vaciar el historial.");
+    setDeletingHistory(false);
   };
   const openAdmin = async () => { setShowAdmin(true); setAdminStatus("Consultando modelos disponibles…"); const response = await fetch("/api/admin/models"); const body = await responseBody(response); if (!response.ok) { setAdminStatus(body.error); return; } setModels(body.models); setSelectedModel(body.selected); setModelNote(body.note); setAdminStatus(""); };
   const saveModel = async () => { setAdminStatus("Guardando…"); const response = await fetch("/api/admin/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: selectedModel }) }); const body = await responseBody(response); setAdminStatus(response.ok ? `Modelo activo: ${body.selected}` : body.error); };
@@ -228,6 +235,7 @@ export default function Home() {
   };
 
   return <main>
+    {showHistory && history.length > 0 && <button type="button" className="history-delete-all" disabled={deletingHistory || history.some((job) => job.status === "generating")} onClick={deleteAllHistory}>{deletingHistory ? "Eliminando todo…" : `Eliminar todo (${history.length})`}</button>}
     <header className="site-header">
       <button className="brand" onClick={() => go("home")} aria-label="Ir al inicio"><span className="brand-mark">A<span>+</span></span><span><strong>Adapta</strong><small>Docencia a medida</small><em>Manu Galán Marín</em></span></button>
       <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button></nav>
