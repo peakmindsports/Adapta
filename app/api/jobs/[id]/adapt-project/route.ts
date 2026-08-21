@@ -12,7 +12,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!body.targetCourse || !courses.includes(body.targetCourse)) return jsonError("Selecciona un nivel educativo válido.");
   const { DB, OPENAI_API_KEY, OPENAI_MODEL } = runtime();
   if (!OPENAI_API_KEY) return jsonError("El administrador debe configurar OPENAI_API_KEY.", 503);
-  const source = await DB.prepare("SELECT title, current_course, result FROM jobs WHERE id = ? AND owner_email = ? AND kind = 'project' AND status = 'completed'").bind(id, owner).first<{ title: string; current_course: string; result: string }>();
+  const source = await DB.prepare("SELECT title, current_course, academic_year, teacher_name, result FROM jobs WHERE id = ? AND owner_email = ? AND kind = 'project' AND status = 'completed'").bind(id, owner).first<{ title: string; current_course: string; academic_year?: string; teacher_name?: string; result: string }>();
   if (!source?.result) return jsonError("Primero debes generar el proyecto interdisciplinar.", 404);
   const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email = ?").bind(owner).first<{ model: string }>();
   const prompt = `Adapta el PROYECTO INTERDISCIPLINAR incluido al nivel educativo ${body.targetCourse}. El proyecto original corresponde a ${source.current_course}. Conserva exactamente su reto, narrativa, producto final, fases, conexión entre áreas y participación familiar: no lo conviertas en un libro por unidades ni reutilices contenido de una adaptación curricular individual. Ajusta únicamente el acceso y la participación: lenguaje, andamiaje, autonomía, tiempos, agrupamientos, materiales, roles, evidencias y evaluación. Mantén altas expectativas y una contribución auténtica al mismo producto colectivo.\n\nIncluye: 1) versión accesible del reto; 2) barreras previsibles; 3) apoyos por fase y área; 4) adaptación de cada sesión; 5) roles posibles; 6) materiales visuales/manipulativos; 7) producto final compartido y forma concreta de contribuir; 8) evaluación adaptada con evidencias observables y rúbrica; 9) participación familiar accesible.\n\nPROYECTO ORIGINAL:\n${source.result}`;
@@ -26,6 +26,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const result = extractText(data); if (!result) return jsonError("La IA no devolvió una adaptación utilizable.", 500);
   const newId = crypto.randomUUID(); const now = Date.now(); const title = `${source.title} · Adaptado a ${body.targetCourse}`;
-  await DB.prepare("INSERT INTO jobs (id, owner_email, kind, title, current_course, target_course, status, result, created_at, updated_at) VALUES (?, ?, 'project_adaptation', ?, ?, ?, 'completed', ?, ?, ?)").bind(newId, owner, title, source.current_course, body.targetCourse, result, now, now).run();
+  await DB.prepare("INSERT INTO jobs (id, owner_email, kind, title, current_course, target_course, subject, academic_year, teacher_name, status, result, created_at, updated_at) VALUES (?, ?, 'project_adaptation', ?, ?, ?, 'Interdisciplinar', ?, ?, 'completed', ?, ?, ?)").bind(newId, owner, title, source.current_course, body.targetCourse, source.academic_year || null, source.teacher_name || null, result, now, now).run();
   return Response.json({ jobId: newId, result, title });
 }

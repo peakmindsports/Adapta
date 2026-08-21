@@ -32,4 +32,12 @@ export async function ensureSchema() {
     DB.prepare("CREATE TABLE IF NOT EXISTS context_phrases (id TEXT PRIMARY KEY NOT NULL, owner_email TEXT NOT NULL, category TEXT NOT NULL, phrase TEXT NOT NULL, created_at INTEGER NOT NULL)"),
     DB.prepare("CREATE INDEX IF NOT EXISTS context_phrases_owner_idx ON context_phrases(owner_email, category)"),
   ]);
+  const columns = await DB.prepare("PRAGMA table_info(jobs)").all<{ name: string }>();
+  const names = new Set(columns.results.map((column) => column.name));
+  const additions = [
+    ["subject", "ALTER TABLE jobs ADD COLUMN subject TEXT"],
+    ["academic_year", "ALTER TABLE jobs ADD COLUMN academic_year TEXT"],
+    ["teacher_name", "ALTER TABLE jobs ADD COLUMN teacher_name TEXT"],
+  ] as const;
+  for (const [name, sql] of additions) if (!names.has(name)) await DB.prepare(sql).run();
 }
