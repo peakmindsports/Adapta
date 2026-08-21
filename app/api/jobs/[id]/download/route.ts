@@ -159,17 +159,19 @@ async function sourceImages(jobId: string, owner: string, requested: number[] = 
         const subtype = object.dict.get(PDFName.of("Subtype")); const filter = object.dict.get(PDFName.of("Filter"));
         if (String(subtype) !== "/Image") continue;
         const width = object.dict.lookupMaybe(PDFName.of("Width"), PDFNumber)?.asNumber() || 0; const height = object.dict.lookupMaybe(PDFName.of("Height"), PDFNumber)?.asNumber() || 0;
-        const ratio = width / height; const colorSpace = String(object.dict.get(PDFName.of("ColorSpace"))); const hasMask = object.dict.has(PDFName.of("SMask")) || object.dict.has(PDFName.of("Mask")); const looksLikePage = width * height > 1500000 && ratio > .64 && ratio < .78;
-        if (width < 240 || height < 160 || ratio < .28 || ratio > 3.6 || hasMask || looksLikePage || colorSpace === "/DeviceGray") continue;
-        if (String(filter) === "/DCTDecode") candidates.push({ bytes: object.getContents(), width, height, type: "jpg" });
-        else if (String(filter) === "/FlateDecode" && width * height <= 5000000) {
+        const ratio = width / height; const colorSpace = String(object.dict.get(PDFName.of("ColorSpace"))); const hasMask = object.dict.has(PDFName.of("SMask")) || object.dict.has(PDFName.of("Mask")); const looksLikePage = width * height > 1500000 && ratio > .64 && ratio < .78; const filterName = String(filter);
+        if (width < 240 || height < 160 || ratio < .28 || ratio > 3.6 || looksLikePage || colorSpace === "/DeviceGray" || colorSpace === "/DeviceCMYK") continue;
+        if (filterName.includes("/DCTDecode") && !hasMask) candidates.push({ bytes: object.getContents(), width, height, type: "jpg" });
+        else if (filterName.includes("/FlateDecode") && width * height <= 5000000) {
           const decoded = decodePDFRawStream(object).decode(); const pixels = width * height; const rgba = new Uint8Array(pixels * 4); if (colorSpace !== "/DeviceRGB" || decoded.length < pixels * 3) continue; let colored = 0; let visible = 0;
-          for (let pixel = 0; pixel < pixels; pixel += 1) { const red = decoded[pixel * 3]; const green = decoded[pixel * 3 + 1]; const blue = decoded[pixel * 3 + 2]; rgba[pixel * 4] = red; rgba[pixel * 4 + 1] = green; rgba[pixel * 4 + 2] = blue; rgba[pixel * 4 + 3] = 255; if (Math.max(red, green, blue) - Math.min(red, green, blue) > 12) colored += 1; if (red + green + blue < 735) visible += 1; }
+          const softMask = object.dict.lookupMaybe(PDFName.of("SMask"), PDFRawStream); let alpha: Uint8Array | null = null; if (softMask) { try { const decodedMask = decodePDFRawStream(softMask).decode(); if (decodedMask.length >= pixels) alpha = decodedMask; } catch { alpha = null; } }
+          for (let pixel = 0; pixel < pixels; pixel += 1) { const red = decoded[pixel * 3]; const green = decoded[pixel * 3 + 1]; const blue = decoded[pixel * 3 + 2]; rgba[pixel * 4] = red; rgba[pixel * 4 + 1] = green; rgba[pixel * 4 + 2] = blue; rgba[pixel * 4 + 3] = alpha?.[pixel] ?? 255; if (Math.max(red, green, blue) - Math.min(red, green, blue) > 12) colored += 1; if (red + green + blue < 735 && (alpha?.[pixel] ?? 255) > 20) visible += 1; }
           if (colored / pixels < .025 || visible / pixels < .06) continue;
           candidates.push({ bytes: new Uint8Array(UPNG.encode([rgba.buffer], width, height, 0)), width, height, type: "png" });
         }
       }
-      const chosen = candidates.slice(0, needed); selected.push(...chosen, ...Array(Math.max(0, needed - chosen.length)).fill(null));
+      const unique = candidates.filter((candidate, candidateIndex, all) => all.findIndex((other) => other.width === candidate.width && other.height === candidate.height && other.bytes.length === candidate.bytes.length) === candidateIndex).sort((left, right) => right.width * right.height - left.width * left.height);
+      const chosen = unique.slice(0, needed); selected.push(...chosen, ...Array(Math.max(0, needed - chosen.length)).fill(null));
     } catch { selected.push(...Array(needed).fill(null)); /* Un PDF sin imágenes utilizables no desplaza imágenes de otra UDI. */ }
   }
   return selected;
