@@ -1,4 +1,4 @@
-import { ensureSchema, jsonError, ownerFrom, runtime } from "../../../_shared";
+import { ensureSchema, GLOBAL_MODEL_OWNER, jsonError, ownerFrom, runtime, SITE_ADMIN_EMAIL } from "../../../_shared";
 
 function extractText(data: any): string {
   if (typeof data.output_text === "string") return data.output_text;
@@ -14,7 +14,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!OPENAI_API_KEY) return jsonError("El administrador debe configurar OPENAI_API_KEY.", 503);
   const source = await DB.prepare("SELECT title, current_course, academic_year, teacher_name, result FROM jobs WHERE id = ? AND owner_email = ? AND kind = 'project' AND status = 'completed'").bind(id, owner).first<{ title: string; current_course: string; academic_year?: string; teacher_name?: string; result: string }>();
   if (!source?.result) return jsonError("Primero debes generar el proyecto interdisciplinar.", 404);
-  const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email = ?").bind(owner).first<{ model: string }>();
+  const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email IN (?, ?) ORDER BY CASE WHEN owner_email = ? THEN 0 ELSE 1 END LIMIT 1").bind(GLOBAL_MODEL_OWNER, SITE_ADMIN_EMAIL, GLOBAL_MODEL_OWNER).first<{ model: string }>();
   const prompt = `Adapta el PROYECTO INTERDISCIPLINAR incluido al nivel educativo ${body.targetCourse}. El proyecto original corresponde a ${source.current_course}. Conserva exactamente su reto, narrativa, producto final, fases, conexión entre áreas y participación familiar: no lo conviertas en un recurso por unidades ni reutilices contenido de una adaptación curricular individual. Ajusta únicamente el acceso y la participación: lenguaje, andamiaje, autonomía, tiempos, agrupamientos, materiales, roles, evidencias y evaluación. Mantén altas expectativas y una contribución auténtica al mismo producto colectivo.\n\nIncluye: 1) versión accesible del reto; 2) barreras previsibles; 3) apoyos por fase y área; 4) adaptación de cada sesión; 5) roles posibles; 6) materiales visuales/manipulativos; 7) producto final compartido y forma concreta de contribuir; 8) evaluación adaptada con indicadores observables vinculados a cada criterio; 9) rúbrica analítica completa de cuatro niveles; 10) lista de control con casillas y observaciones; 11) prueba escrita breve con puntuación y solucionario; 12) participación familiar accesible. Conserva los códigos y criterios del proyecto original: no inventes ninguno. Entrega todos los instrumentos completos y utilizables.\n\nPROYECTO ORIGINAL:\n${source.result}`;
   let data: any = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {

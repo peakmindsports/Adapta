@@ -1,4 +1,4 @@
-import { ensureSchema, jsonError, ownerFrom, runtime } from "../../_shared";
+import { ensureSchema, GLOBAL_MODEL_OWNER, isSiteAdmin, jsonError, runtime, SITE_ADMIN_EMAIL } from "../../_shared";
 
 type ModelItem = { id: string; label: string; cost: string; rank: number };
 function describe(id: string): ModelItem {
@@ -9,11 +9,11 @@ function describe(id: string): ModelItem {
 }
 
 export async function GET(request: Request) {
-  await ensureSchema(); const owner = ownerFrom(request); const { DB, OPENAI_API_KEY, OPENAI_MODEL } = runtime();
+  await ensureSchema(); if (!isSiteAdmin(request)) return jsonError("Solo la persona administradora puede elegir el modelo.", 403); const { DB, OPENAI_API_KEY, OPENAI_MODEL } = runtime();
   if (!OPENAI_API_KEY) return jsonError("La clave de OpenAI no está configurada.", 503);
   const [modelsResponse, setting] = await Promise.all([
     fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } }),
-    DB.prepare("SELECT model FROM user_settings WHERE owner_email = ?").bind(owner).first<{ model: string }>(),
+    DB.prepare("SELECT model FROM user_settings WHERE owner_email IN (?, ?) ORDER BY CASE WHEN owner_email = ? THEN 0 ELSE 1 END LIMIT 1").bind(GLOBAL_MODEL_OWNER, SITE_ADMIN_EMAIL, GLOBAL_MODEL_OWNER).first<{ model: string }>(),
   ]);
   const payload = await modelsResponse.json() as any;
   if (!modelsResponse.ok) return jsonError(payload?.error?.message || "No se pudieron consultar los modelos.", 502);
@@ -22,10 +22,10 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  await ensureSchema(); const owner = ownerFrom(request); const { DB, OPENAI_API_KEY } = runtime(); const body = await request.json() as { model?: string };
+  await ensureSchema(); if (!isSiteAdmin(request)) return jsonError("Solo la persona administradora puede elegir el modelo.", 403); const { DB, OPENAI_API_KEY } = runtime(); const body = await request.json() as { model?: string };
   if (!body.model || !/^gpt-[a-zA-Z0-9._-]+$/.test(body.model)) return jsonError("Modelo no válido.");
   const response = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${OPENAI_API_KEY}` } }); const payload = await response.json() as any;
   if (!response.ok || !(payload.data || []).some((item: any) => item.id === body.model)) return jsonError("Ese modelo no está disponible para tu clave.");
-  await DB.prepare("INSERT INTO user_settings (owner_email, model, updated_at) VALUES (?, ?, ?) ON CONFLICT(owner_email) DO UPDATE SET model = excluded.model, updated_at = excluded.updated_at").bind(owner, body.model, Date.now()).run();
+  await DB.prepare("INSERT INTO user_settings (owner_email, model, updated_at) VALUES (?, ?, ?) ON CONFLICT(owner_email) DO UPDATE SET model = excluded.model, updated_at = excluded.updated_at").bind(GLOBAL_MODEL_OWNER, body.model, Date.now()).run();
   return Response.json({ selected: body.model });
 }

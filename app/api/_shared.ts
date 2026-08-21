@@ -13,6 +13,10 @@ export function ownerFrom(request: Request) {
   return request.headers.get("oai-authenticated-user-email") ?? "private-owner";
 }
 
+export const SITE_ADMIN_EMAIL = "manugalan102@gmail.com";
+export const GLOBAL_MODEL_OWNER = "global-model-setting";
+export function isSiteAdmin(request: Request) { return ownerFrom(request).toLowerCase() === SITE_ADMIN_EMAIL; }
+
 export function jsonError(message: string, status = 400) {
   return Response.json({ error: message }, { status });
 }

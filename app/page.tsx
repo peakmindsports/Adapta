@@ -106,6 +106,7 @@ export default function Home() {
   const [sharedProjects, setSharedProjects] = useState<SharedProject[]>([]);
   const [sharingProject, setSharingProject] = useState("");
   const [showAdmin, setShowAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [models, setModels] = useState<ApiModel[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [modelNote, setModelNote] = useState("");
@@ -116,6 +117,7 @@ export default function Home() {
   const [adaptedProject, setAdaptedProject] = useState<{ result: string; jobId: string } | null>(null);
   const [projectSubject, setProjectSubject] = useState<"project_math" | "project_language" | "project_science" | "project_english">("project_math");
   const [recommendation, setRecommendation] = useState<{ recommendedCourse: string; explanation: string; confidence: string; caveat: string } | null>(null);
+  useEffect(() => { fetch("/api/session").then((response) => response.ok ? response.json() : { isAdmin: false }).then((session) => setIsAdmin(Boolean(session.isAdmin))).catch(() => setIsAdmin(false)); }, []);
   const addFiles = (key: UploadKey, incoming: File[], replace = false) => setFiles((current) => ({ ...current, [key]: replace ? incoming : [...current[key], ...incoming] }));
   const updateBatchStudent = (id: string, patch: Partial<BatchStudent>) => setBatchStudents((students) => students.map((student) => student.id === id ? { ...student, ...patch } : student));
   const addBatchStudent = () => setBatchStudents((students) => [...students, newBatchStudent()]);
@@ -247,13 +249,13 @@ export default function Home() {
   };
 
   return <main>
-    <button type="button" className="library-launch" onClick={openLibrary}>◫ Biblioteca compartida</button>
+    <button type="button" className={`library-launch ${isAdmin ? "admin-visible" : "user-visible"}`} onClick={openLibrary}>◫ Biblioteca compartida</button>
     {showLibrary && <SharedLibrary ownProjects={history.filter((job) => job.kind.startsWith("project") && job.status === "completed")} projects={sharedProjects} busy={sharingProject} onClose={() => setShowLibrary(false)} onToggle={toggleProjectSharing} onCopy={copySharedProject} />}
     {showHistory && history.length > 0 && <button type="button" className="history-delete-all" disabled={deletingHistory || history.some((job) => job.status === "generating")} onClick={deleteAllHistory}>{deletingHistory ? "Eliminando todo…" : `Eliminar todo (${history.length})`}</button>}
     <header className="site-header">
       <button className="brand" onClick={() => go("home")} aria-label="Ir al inicio"><span className="brand-mark">A<span>+</span></span><span><strong>Adapta</strong><small>Docencia a medida</small><em>Manu Galán Marín</em></span></button>
       <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button></nav>
-      <div className="header-tools"><button className="admin-button" onClick={openAdmin}>⚙ Administrador</button><button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button></div>
+      <div className="header-tools">{isAdmin && <button className="admin-button" onClick={openAdmin}>⚙ Administrador</button>}<button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button></div>
     </header>
     {view === "home" && <div className="home-view">
       <section className="hero">
