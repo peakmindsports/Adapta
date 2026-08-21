@@ -35,6 +35,15 @@ function selectUnits(markdown: string, requested: number[]) {
   return chosen.length ? `${preamble}\n\n---\n\n${chosen.map((chapter) => chapter.text).join("\n\n---\n\n")}` : markdown;
 }
 
+function studentSafeMarkdown(markdown: string) {
+  return markdown
+    .split("\n")
+    .filter((line) => !/^\s*(?:[-*]\s*)?\*{0,2}(?:nivel competencial(?: de trabajo)?|nivel de concreción curricular|nivel curricular|nivel educativo de adaptación)\s*:\*{0,2}/i.test(line))
+    .filter((line) => !/^\s*\|[^|]*(?:nivel competencial|nivel de concreción curricular|nivel curricular|nivel educativo de adaptación)[^|]*\|/i.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 async function makeWord(title: string, markdown: string, images: SourceImage[]) {
   const children: Paragraph[] = [new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 240 } }), new Paragraph({ children: [new TextRun({ text: "Libro adaptado", color: "277F91", size: 24 })], spacing: { after: 360 } })];
   let firstHeading = true;
@@ -124,7 +133,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request);
   const job = await runtime().DB.prepare("SELECT title, result FROM jobs WHERE id = ? AND owner_email = ? AND status = 'completed'").bind(id, owner).first<{ title: string; result: string }>();
   if (!job?.result) return jsonError("El documento aún no está disponible.", 404);
-  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const result = selectUnits(job.result, requested); const suffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const filename = `${safeFilename(job.title)}${suffix}`; const images = await sourceImages(id, owner, requested);
+  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const result = studentSafeMarkdown(selectUnits(job.result, requested)); const suffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const filename = `${safeFilename(job.title)}${suffix}`; const images = await sourceImages(id, owner, requested);
   if (format === "docx") { const blob = await makeWord(job.title, result, images); return new Response(blob, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename}.docx"`, "Cache-Control": "private, no-store" } }); }
   const bytes = await makePdf(job.title, result, images); const body = bytes.slice().buffer as ArrayBuffer;
   return new Response(body, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"`, "Cache-Control": "private, no-store" } });
