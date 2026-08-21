@@ -169,7 +169,11 @@ export default function Home() {
 }
 
 function ResultPanel({ result, jobId }: { result: string; jobId: string }) {
-  return <section className="result-panel"><div><span>PROPUESTA GENERADA</span><h2>Tu documento está listo</h2></div><div className="result-downloads"><a href={`/api/jobs/${jobId}/download?format=pdf`}>Descargar PDF ↓</a><a href={`/api/jobs/${jobId}/download?format=docx`}>Descargar Word ↓</a></div><pre>{result}</pre></section>;
+  const units = [...result.matchAll(/^# Unidad\s+(\d+)\s*:\s*(.+)$/gim)].map((match) => ({ number: Number(match[1]), title: match[2].trim() }));
+  const [selectedUnits, setSelectedUnits] = useState<number[]>([]);
+  const selectedQuery = selectedUnits.length ? `&units=${selectedUnits.join(",")}` : "";
+  const toggleUnit = (number: number) => setSelectedUnits((current) => current.includes(number) ? current.filter((item) => item !== number) : [...current, number].sort((a, b) => a - b));
+  return <section className="result-panel"><div><span>PROPUESTA GENERADA</span><h2>Tu documento está listo</h2></div><div className="result-downloads"><a href={`/api/jobs/${jobId}/download?format=pdf`}>PDF completo ↓</a><a href={`/api/jobs/${jobId}/download?format=docx`}>Word completo ↓</a></div>{units.length > 1 && <details className="unit-download-picker"><summary>Descargar unidades concretas</summary><p>Marca una o varias UDI para crear un documento independiente con esa selección.</p><div className="unit-checks">{units.map((unit) => <label key={unit.number}><input type="checkbox" checked={selectedUnits.includes(unit.number)} onChange={() => toggleUnit(unit.number)} /><span><b>UDI {unit.number}</b>{unit.title}</span></label>)}</div><div className="unit-selection-actions"><button type="button" onClick={() => setSelectedUnits(units.map((unit) => unit.number))}>Seleccionar todas</button><button type="button" onClick={() => setSelectedUnits([])}>Limpiar</button>{selectedUnits.length > 0 && <><a href={`/api/jobs/${jobId}/download?format=pdf${selectedQuery}`}>PDF de la selección ↓</a><a href={`/api/jobs/${jobId}/download?format=docx${selectedQuery}`}>Word de la selección ↓</a></>}</div></details>}<pre>{result}</pre></section>;
 }
 
 const phraseDefaults: Record<string, string[]> = {

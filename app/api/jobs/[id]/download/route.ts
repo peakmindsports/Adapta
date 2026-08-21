@@ -25,6 +25,16 @@ function parseMarkdown(markdown: string): Block[] {
   flush(); return blocks.filter((block) => block.type === "break" || block.text);
 }
 
+function selectUnits(markdown: string, requested: number[]) {
+  if (!requested.length) return markdown;
+  const matches = [...markdown.matchAll(/^# Unidad\s+(\d+)\s*:\s*.+$/gim)];
+  if (!matches.length) return markdown;
+  const preamble = markdown.slice(0, matches[0].index).replace(/## Índice[\s\S]*?(?=\n---\n|$)/i, "").trim();
+  const chapters = matches.map((match, index) => ({ number: Number(match[1]), text: markdown.slice(match.index, matches[index + 1]?.index ?? markdown.length).replace(/^\s*---\s*$/gm, "").trim() }));
+  const chosen = chapters.filter((chapter) => requested.includes(chapter.number));
+  return chosen.length ? `${preamble}\n\n---\n\n${chosen.map((chapter) => chapter.text).join("\n\n---\n\n")}` : markdown;
+}
+
 async function makeWord(title: string, markdown: string, images: SourceImage[]) {
   const children: Paragraph[] = [new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 240 } }), new Paragraph({ children: [new TextRun({ text: "Libro adaptado", color: "277F91", size: 24 })], spacing: { after: 360 } })];
   let firstHeading = true;
@@ -86,10 +96,11 @@ async function readStoredFile(storageKey: string) {
   return new Uint8Array(await new Blob(parts).arrayBuffer());
 }
 
-async function sourceImages(jobId: string, owner: string) {
+async function sourceImages(jobId: string, owner: string, requested: number[] = []) {
   const rows = await runtime().DB.prepare("SELECT content_type, storage_key FROM job_files WHERE job_id = ? AND owner_email = ? AND category = 'unidades' ORDER BY created_at").bind(jobId, owner).all<{ content_type: string; storage_key: string }>();
   const selected: SourceImage[] = [];
-  for (const row of rows.results) {
+  for (const [index, row] of rows.results.entries()) {
+    if (requested.length && !requested.includes(index + 1)) continue;
     try {
       const bytes = await readStoredFile(row.storage_key);
       if (/image\/jpe?g/i.test(row.content_type)) { selected.push({ bytes, width: 1200, height: 800, type: "jpg" }); continue; }
@@ -113,8 +124,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request);
   const job = await runtime().DB.prepare("SELECT title, result FROM jobs WHERE id = ? AND owner_email = ? AND status = 'completed'").bind(id, owner).first<{ title: string; result: string }>();
   if (!job?.result) return jsonError("El documento aún no está disponible.", 404);
-  const format = new URL(request.url).searchParams.get("format") === "docx" ? "docx" : "pdf"; const filename = safeFilename(job.title); const images = await sourceImages(id, owner);
-  if (format === "docx") { const blob = await makeWord(job.title, job.result, images); return new Response(blob, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename}.docx"`, "Cache-Control": "private, no-store" } }); }
-  const bytes = await makePdf(job.title, job.result, images); const body = bytes.slice().buffer as ArrayBuffer;
+  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const result = selectUnits(job.result, requested); const suffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const filename = `${safeFilename(job.title)}${suffix}`; const images = await sourceImages(id, owner, requested);
+  if (format === "docx") { const blob = await makeWord(job.title, result, images); return new Response(blob, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename}.docx"`, "Cache-Control": "private, no-store" } }); }
+  const bytes = await makePdf(job.title, result, images); const body = bytes.slice().buffer as ArrayBuffer;
   return new Response(body, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"`, "Cache-Control": "private, no-store" } });
 }
