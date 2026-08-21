@@ -1,8 +1,9 @@
 import { AlignmentType, Document, HeadingLevel, ImageRun, Packer, PageBreak, Paragraph, TextRun } from "docx";
-import { PDFDocument, PDFName, PDFNumber, PDFRawStream, StandardFonts, rgb } from "pdf-lib";
+import { decodePDFRawStream, PDFDocument, PDFName, PDFNumber, PDFRawStream, StandardFonts, rgb } from "pdf-lib";
+import UPNG from "@pdf-lib/upng";
 import { ensureSchema, jsonError, ownerFrom, runtime, safeFilename } from "../../../_shared";
 
-type Block = { type: "heading" | "bullet" | "number" | "paragraph" | "break" | "image"; text: string; level?: number };
+type Block = { type: "heading" | "bullet" | "checkbox" | "number" | "paragraph" | "tableRow" | "card" | "break" | "image"; text: string; level?: number };
 type SourceImage = { bytes: Uint8Array; width: number; height: number; type: "jpg" | "png" };
 
 function cleanMarkdown(value: string) {
@@ -14,11 +15,15 @@ function parseMarkdown(markdown: string): Block[] {
   const flush = () => { if (paragraph.length) blocks.push({ type: "paragraph", text: cleanMarkdown(paragraph.join(" ")) }); paragraph = []; };
   for (const raw of markdown.replace(/\r/g, "").split("\n")) {
     const line = raw.trim(); if (!line) { flush(); continue; }
-    const heading = line.match(/^(#{1,6})\s+(.+)$/); const bullet = line.match(/^[-*+]\s+(.+)$/); const number = line.match(/^\d+[.)]\s+(.+)$/); const image = line.match(/^\[IMAGEN:\s*(.+)\]$/i);
+    const heading = line.match(/^(#{1,6})\s+(.+)$/); const checkbox = line.match(/^[-*+]\s+\[\s*\]\s+(.+)$/); const bullet = line.match(/^[-*+]\s+(.+)$/); const number = line.match(/^\d+[.)]\s+(.+)$/); const image = line.match(/^\[IMAGEN:\s*(.+)\]$/i); const card = line.match(/^(?:>\s*)?\[TARJETA:\s*(.+)\]$/i);
     if (heading) { flush(); blocks.push({ type: "heading", text: cleanMarkdown(heading[2]), level: Math.min(3, heading[1].length) }); }
     else if (image) { flush(); blocks.push({ type: "image", text: cleanMarkdown(image[1]) }); }
+    else if (card) { flush(); blocks.push({ type: "card", text: cleanMarkdown(card[1]) }); }
+    else if (checkbox) { flush(); blocks.push({ type: "checkbox", text: cleanMarkdown(checkbox[1]) }); }
     else if (bullet) { flush(); blocks.push({ type: "bullet", text: cleanMarkdown(bullet[1]) }); }
     else if (number) { flush(); blocks.push({ type: "number", text: cleanMarkdown(number[1]) }); }
+    else if (/^\|(?:\s*:?-+:?\s*\|)+$/.test(line)) { flush(); }
+    else if (/^\|.+\|$/.test(line)) { flush(); blocks.push({ type: "tableRow", text: line.slice(1, -1).split("|").map((cell) => cleanMarkdown(cell)).filter(Boolean).join("  ·  ") }); }
     else if (/^---+$/.test(line)) { flush(); blocks.push({ type: "break", text: "" }); }
     else paragraph.push(line);
   }
@@ -33,6 +38,13 @@ function selectUnits(markdown: string, requested: number[]) {
   const chapters = matches.map((match, index) => ({ number: Number(match[1]), text: markdown.slice(match.index, matches[index + 1]?.index ?? markdown.length).replace(/^\s*---\s*$/gm, "").trim() }));
   const chosen = chapters.filter((chapter) => requested.includes(chapter.number));
   return chosen.length ? `${preamble}\n\n---\n\n${chosen.map((chapter) => chapter.text).join("\n\n---\n\n")}` : markdown;
+}
+
+function repairIndex(markdown: string) {
+  const units = [...markdown.matchAll(/^# Unidad\s+(\d+)\s*:\s*(.+)$/gim)].map((match) => ({ number: Number(match[1]), title: match[2].trim() }));
+  if (!units.length || !/## Índice/i.test(markdown)) return markdown;
+  const index = `## Índice\n${units.map((unit) => `${unit.number}. Unidad ${unit.number} · ${unit.title}`).join("\n")}`;
+  return markdown.replace(/## Índice[\s\S]*?(?=\n---\n)/i, index);
 }
 
 function studentSafeMarkdown(markdown: string) {
@@ -53,7 +65,12 @@ async function makeWord(title: string, markdown: string, images: SourceImage[]) 
     if (block.type === "image") {
       const image = images[imageIndex++];
       if (image) { const scale = Math.min(470 / image.width, 260 / image.height, 1); children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ type: image.type, data: image.bytes, transformation: { width: Math.round(image.width * scale), height: Math.round(image.height * scale) } })], spacing: { before: 120, after: 140 } })); }
-      else children.push(new Paragraph({ children: [new TextRun({ text: `Apoyo visual: ${block.text}`, italics: true, color: "277F91" })], spacing: { before: 80, after: 120 } }));
+    } else if (block.type === "card") {
+      children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `✂  ${block.text}`, bold: true, size: 24, color: "172B30" })], shading: { fill: "FFF4D6" }, border: { top: { color: "E1A93B", style: "dashed", size: 8 }, bottom: { color: "E1A93B", style: "dashed", size: 8 }, left: { color: "E1A93B", style: "dashed", size: 8 }, right: { color: "E1A93B", style: "dashed", size: 8 } }, spacing: { before: 100, after: 100 } }));
+    } else if (block.type === "checkbox") {
+      children.push(new Paragraph({ children: [new TextRun({ text: "☐  ", bold: true, size: 26 }), new TextRun({ text: block.text, size: 22 })], spacing: { before: 45, after: 75 }, indent: { left: 280 } }));
+    } else if (block.type === "tableRow") {
+      children.push(new Paragraph({ children: [new TextRun({ text: block.text, size: 20 })], shading: { fill: "F1F8F6" }, border: { bottom: { color: "B8D8CF", style: "single", size: 4 } }, spacing: { before: 60, after: 80 } }));
     } else if (block.type === "heading") {
       if (!firstHeading && block.level === 1) children.push(new Paragraph({ children: [new PageBreak()] })); firstHeading = false;
       children.push(new Paragraph({ text: block.text, heading: block.level === 1 ? HeadingLevel.HEADING_1 : block.level === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3, spacing: { before: 180, after: 100 } }));
@@ -88,7 +105,12 @@ async function makePdf(title: string, markdown: string, images: SourceImage[]) {
     if (block.type === "image") {
       const image = images[imageIndex++];
       if (image) { const embedded = image.type === "png" ? await pdf.embedPng(image.bytes) : await pdf.embedJpg(image.bytes); const scale = Math.min((pageSize[0] - margin * 2) / embedded.width, 245 / embedded.height, 1); const width = embedded.width * scale; const height = embedded.height * scale; if (y - height < margin + 28) addPage(); page.drawRectangle({ x: margin - 6, y: y - height - 6, width: pageSize[0] - margin * 2 + 12, height: height + 12, color: rgb(0.94, 0.98, 0.97), borderColor: rgb(0.55, 0.76, 0.72), borderWidth: 1 }); page.drawImage(embedded, { x: (pageSize[0] - width) / 2, y: y - height, width, height }); y -= height + 18; }
-      else { page.drawRectangle({ x: margin, y: y - 48, width: pageSize[0] - margin * 2, height: 48, color: rgb(0.9, 0.96, 0.95) }); draw(`Apoyo visual: ${block.text}`, 9.5, true, rgb(0.15, 0.5, 0.57), 10, 10); }
+    } else if (block.type === "card") {
+      if (y < margin + 90) addPage(); page.drawRectangle({ x: margin + 25, y: y - 62, width: pageSize[0] - margin * 2 - 50, height: 62, color: rgb(1, 0.96, 0.84), borderColor: rgb(0.88, 0.6, 0.18), borderWidth: 1.5, borderDashArray: [5, 4] }); draw(block.text, 11, true, rgb(0.15, 0.2, 0.2), 42, 18);
+    } else if (block.type === "checkbox") {
+      if (y < margin + 35) addPage(); page.drawRectangle({ x: margin + 8, y: y - 2, width: 11, height: 11, borderColor: rgb(0.15, 0.5, 0.57), borderWidth: 1.5 }); draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 28, 7);
+    } else if (block.type === "tableRow") {
+      const lines = wrapText(block.text, pageSize[0] - margin * 2 - 20, 9.5, regular); const boxHeight = Math.max(28, lines.length * 13 + 12); if (y - boxHeight < margin + 28) addPage(); page.drawRectangle({ x: margin, y: y - boxHeight + 5, width: pageSize[0] - margin * 2, height: boxHeight, color: rgb(0.95, 0.98, 0.97), borderColor: rgb(0.72, 0.84, 0.81), borderWidth: .7 }); draw(block.text, 9.5, false, rgb(0.18, 0.25, 0.26), 10, 8);
     } else if (block.type === "heading") { if (!firstHeading && block.level === 1 && y < pageSize[1] - margin - 80) addPage(); firstHeading = false; y -= block.level === 1 ? 10 : 4; if (/actividad|producto final|demuestro|repaso|juego|taller/i.test(block.text)) { if (y < margin + 55) addPage(); page.drawRectangle({ x: margin - 8, y: y - 8, width: pageSize[0] - margin * 2 + 16, height: 30, color: rgb(0.99, 0.9, 0.84) }); } draw(block.text, block.level === 1 ? 18 : block.level === 2 ? 15 : 12, true, block.level === 1 ? rgb(0.15, 0.5, 0.57) : rgb(0.09, 0.17, 0.19), 0, 8); }
     else if (block.type === "bullet") draw(`- ${block.text}`, 10.5, false, rgb(0.18, 0.25, 0.26), 12, 4);
     else if (block.type === "number") draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 12, 4);
@@ -119,21 +141,29 @@ async function sourceImages(jobId: string, owner: string, requested: number[] = 
       for (const [, object] of source.context.enumerateIndirectObjects()) {
         if (!(object instanceof PDFRawStream)) continue;
         const subtype = object.dict.get(PDFName.of("Subtype")); const filter = object.dict.get(PDFName.of("Filter"));
-        if (String(subtype) !== "/Image" || String(filter) !== "/DCTDecode") continue;
+        if (String(subtype) !== "/Image") continue;
         const width = object.dict.lookupMaybe(PDFName.of("Width"), PDFNumber)?.asNumber() || 0; const height = object.dict.lookupMaybe(PDFName.of("Height"), PDFNumber)?.asNumber() || 0;
-        if (width >= 240 && height >= 160) candidates.push({ bytes: object.getContents(), width, height, type: "jpg" });
+        if (width < 240 || height < 160) continue;
+        if (String(filter) === "/DCTDecode") candidates.push({ bytes: object.getContents(), width, height, type: "jpg" });
+        else if (String(filter) === "/FlateDecode" && width * height <= 5000000) {
+          const decoded = decodePDFRawStream(object).decode(); const colorSpace = String(object.dict.get(PDFName.of("ColorSpace"))); const pixels = width * height; const rgba = new Uint8Array(pixels * 4);
+          if (colorSpace === "/DeviceRGB" && decoded.length >= pixels * 3) for (let pixel = 0; pixel < pixels; pixel += 1) { rgba[pixel * 4] = decoded[pixel * 3]; rgba[pixel * 4 + 1] = decoded[pixel * 3 + 1]; rgba[pixel * 4 + 2] = decoded[pixel * 3 + 2]; rgba[pixel * 4 + 3] = 255; }
+          else if (colorSpace === "/DeviceGray" && decoded.length >= pixels) for (let pixel = 0; pixel < pixels; pixel += 1) { rgba[pixel * 4] = decoded[pixel]; rgba[pixel * 4 + 1] = decoded[pixel]; rgba[pixel * 4 + 2] = decoded[pixel]; rgba[pixel * 4 + 3] = 255; }
+          else continue;
+          candidates.push({ bytes: new Uint8Array(UPNG.encode([rgba.buffer], width, height, 0)), width, height, type: "png" });
+        }
       }
-      candidates.sort((a, b) => b.width * b.height - a.width * a.height); selected.push(...candidates.slice(0, 3));
+      candidates.sort((a, b) => b.width * b.height - a.width * a.height); selected.push(...candidates.slice(0, 8));
     } catch { /* Un PDF sin imágenes JPEG utilizables no bloquea la descarga. */ }
   }
-  return selected.slice(0, 36);
+  return selected.slice(0, 80);
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request);
   const job = await runtime().DB.prepare("SELECT title, result FROM jobs WHERE id = ? AND owner_email = ? AND status = 'completed'").bind(id, owner).first<{ title: string; result: string }>();
   if (!job?.result) return jsonError("El documento aún no está disponible.", 404);
-  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const result = studentSafeMarkdown(selectUnits(job.result, requested)); const suffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const filename = `${safeFilename(job.title)}${suffix}`; const images = await sourceImages(id, owner, requested);
+  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const result = studentSafeMarkdown(selectUnits(repairIndex(job.result), requested)); const suffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const filename = `${safeFilename(job.title)}${suffix}`; const images = await sourceImages(id, owner, requested);
   if (format === "docx") { const blob = await makeWord(job.title, result, images); return new Response(blob, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename}.docx"`, "Cache-Control": "private, no-store" } }); }
   const bytes = await makePdf(job.title, result, images); const body = bytes.slice().buffer as ArrayBuffer;
   return new Response(body, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"`, "Cache-Control": "private, no-store" } });
