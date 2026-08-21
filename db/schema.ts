@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const jobs = sqliteTable("jobs", {
   id: text("id").primaryKey(),
@@ -14,6 +14,7 @@ export const jobs = sqliteTable("jobs", {
   status: text("status").notNull().default("draft"),
   result: text("result"),
   error: text("error"),
+  sharedAt: integer("shared_at", { mode: "timestamp_ms" }),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
@@ -43,3 +44,9 @@ export const contextPhrases = sqliteTable("context_phrases", {
   phrase: text("phrase").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+export const sharedProjectReads = sqliteTable("shared_project_reads", {
+  ownerEmail: text("owner_email").notNull(),
+  projectId: text("project_id").notNull(),
+  readAt: integer("read_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [primaryKey({ columns: [table.ownerEmail, table.projectId] })]);

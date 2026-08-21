@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 type View = "home" | "adaptacion" | "proyecto";
 type UploadKey = "dictamen" | "programacion" | "criterios" | "unidades" | "material" | "proyecto" | "project_math" | "project_math_criteria" | "project_language" | "project_language_criteria" | "project_science" | "project_science_criteria" | "project_english" | "project_english_criteria";
-type Job = { id: string; kind: string; title: string; studentName?: string; currentCourse?: string; targetCourse?: string; subject?: string; academicYear?: string; teacherName?: string; status: string; sharedAt?: number | null; createdAt: number; result?: string };
-type SharedProject = { id: string; title: string; kind: string; currentCourse?: string; targetCourse?: string; academicYear?: string; teacherName?: string; ownerEmail?: string; sharedAt: number; isMine: boolean };
+type Job = { id: string; kind: string; title: string; studentName?: string; currentCourse?: string; targetCourse?: string; subject?: string; academicYear?: string; teacherName?: string; status: string; sharedAt?: number | null; createdAt: number; updatedAt: number; result?: string };
+type SharedProject = { id: string; title: string; kind: string; currentCourse?: string; targetCourse?: string; academicYear?: string; teacherName?: string; ownerEmail?: string; sharedAt: number; isMine: boolean; isRead: boolean };
 type ApiModel = { id: string; label: string; cost: string; rank: number };
 type StudentContext = { strengths: string; classroomContext: string; familyContext: string; effectiveSupports: string; notes: string };
 type BatchStudent = { id: string; name: string; currentCourse: string; targetCourse: string; reports: File[]; levelMaterial: File[]; context: StudentContext; assessing: boolean; recommendation?: string };
@@ -118,6 +118,12 @@ export default function Home() {
   const [projectSubject, setProjectSubject] = useState<"project_math" | "project_language" | "project_science" | "project_english">("project_math");
   const [recommendation, setRecommendation] = useState<{ recommendedCourse: string; explanation: string; confidence: string; caveat: string } | null>(null);
   useEffect(() => { fetch("/api/session").then((response) => response.ok ? response.json() : { isAdmin: false }).then((session) => setIsAdmin(Boolean(session.isAdmin))).catch(() => setIsAdmin(false)); }, []);
+  useEffect(() => {
+    const refresh = () => fetch("/api/shared-projects").then((response) => response.ok ? response.json() : { projects: [] }).then((body) => setSharedProjects(body.projects)).catch(() => undefined);
+    void refresh();
+    const interval = window.setInterval(refresh, 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
   const addFiles = (key: UploadKey, incoming: File[], replace = false) => setFiles((current) => ({ ...current, [key]: replace ? incoming : [...current[key], ...incoming] }));
   const updateBatchStudent = (id: string, patch: Partial<BatchStudent>) => setBatchStudents((students) => students.map((student) => student.id === id ? { ...student, ...patch } : student));
   const addBatchStudent = () => setBatchStudents((students) => [...students, newBatchStudent()]);
@@ -125,10 +131,28 @@ export default function Home() {
   const updateBatchContext = (id: string, context: StudentContext) => setBatchStudents((students) => students.map((student) => student.id === id ? { ...student, context } : student));
   const removeBatchStudent = (id: string) => setBatchStudents((students) => students.length > 2 ? students.filter((student) => student.id !== id) : students);
   const go = (next: View) => { setNotice(""); if (!processing) { setResult(""); setActiveJob(""); setAdaptedProject(null); setProgress(0); setProgressLabel(""); } viewRef.current = next; setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
-  const loadHistory = async () => { const response = await fetch("/api/jobs"); if (response.ok) setHistory((await response.json()).jobs); };
+  const loadHistory = async () => {
+    const response = await fetch("/api/jobs");
+    if (!response.ok) return;
+    const jobs = (await response.json()).jobs as Job[];
+    setHistory(jobs.map((job) => job.status === "generating" ? { ...job, status: "en generación" } : job));
+  };
   const openHistory = async () => { await loadHistory(); setShowHistory(true); };
   const loadSharedProjects = async () => { const response = await fetch("/api/shared-projects"); if (response.ok) setSharedProjects((await response.json()).projects); };
   const openLibrary = async () => { await Promise.all([loadHistory(), loadSharedProjects()]); setShowLibrary(true); };
+  const openSharedNotification = async () => {
+    const project = sharedProjects.find((item) => !item.isMine && !item.isRead);
+    if (!project) { await openLibrary(); return; }
+    await Promise.all([loadHistory(), fetch("/api/shared-projects", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: project.id }) })]);
+    setSharedProjects((items) => items.map((item) => item.id === project.id ? { ...item, isRead: true } : item));
+    setShowLibrary(true);
+    window.setTimeout(() => {
+      const heading = [...document.querySelectorAll<HTMLElement>(".shared-project-list article strong")].find((element) => element.textContent === project.title);
+      const article = heading?.closest<HTMLElement>("article");
+      article?.classList.add("shared-project-highlight");
+      article?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+  };
   const toggleProjectSharing = async (job: Job) => { setSharingProject(job.id); const response = await fetch(`/api/jobs/${job.id}/share`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shared: !job.sharedAt }) }); const body = await responseBody(response); if (response.ok) { setHistory((items) => items.map((item) => item.id === job.id ? { ...item, sharedAt: body.sharedAt } : item)); await loadSharedProjects(); } else window.alert(body.error || "No se pudo cambiar el estado del proyecto."); setSharingProject(""); };
   const copySharedProject = async (project: SharedProject) => { setSharingProject(project.id); const response = await fetch("/api/shared-projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: project.id }) }); const body = await responseBody(response); if (response.ok) { await loadHistory(); setShowLibrary(false); window.alert("El proyecto se ha guardado como una copia independiente en tu historial."); } else window.alert(body.error || "No se pudo copiar el proyecto."); setSharingProject(""); };
   const visibleHistory = history.filter((job) => {
@@ -136,19 +160,37 @@ export default function Home() {
     const searchable = [job.title, job.studentName, job.teacherName, job.subject, job.currentCourse, job.targetCourse].filter(Boolean).join(" ").toLocaleLowerCase("es");
     return (!query || searchable.includes(query)) && (!historyKind || (historyKind === "project" ? job.kind.startsWith("project") : job.kind === historyKind)) && (!historySubject || job.subject === historySubject) && (!historyLevel || job.targetCourse === historyLevel || job.currentCourse === historyLevel) && (!historyYear || job.academicYear === historyYear);
   });
+  const unreadSharedCount = sharedProjects.filter((project) => !project.isMine && !project.isRead).length;
   const recoverJob = async (job: Job) => {
     const response = await fetch(`/api/jobs/${job.id}`); const body = await responseBody(response); if (!response.ok || !body.job?.result) return;
     const saved = body.job as Job; setStudentName(saved.studentName || ""); setCurrentCourse(saved.currentCourse || ""); setTargetCourse(saved.targetCourse || ""); setSubject(saved.subject || ""); setAcademicYear(saved.academicYear || academicYears[0]); setTeacherName(saved.teacherName || ""); setActiveJob(saved.id); setResult(saved.result || ""); setShowHistory(false); viewRef.current = saved.kind === "adaptation" ? "adaptacion" : "proyecto"; setView(viewRef.current); window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const deleteJob = async (job: Job) => {
     if (!window.confirm(`¿Eliminar definitivamente “${job.title}” y sus documentos asociados? Esta acción no se puede deshacer.`)) return;
-    setDeletingJob(job.id); const response = await fetch(`/api/jobs/${job.id}`, { method: "DELETE" }); const body = await responseBody(response); if (response.ok) { setHistory((jobs) => jobs.filter((item) => item.id !== job.id)); if (activeJob === job.id) { setActiveJob(""); setResult(""); } } else window.alert(body.error || "No se pudo eliminar el trabajo."); setDeletingJob("");
+    setDeletingJob(job.id);
+    try {
+      const response = await fetch(`/api/jobs/${job.id}`, { method: "DELETE" });
+      const body = await responseBody(response);
+      if (!response.ok) throw new Error(body.error || "No se pudo eliminar el trabajo.");
+      setHistory((jobs) => jobs.filter((item) => item.id !== job.id));
+      if (activeJob === job.id) { setActiveJob(""); setResult(""); }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "No se pudo eliminar el trabajo. Inténtalo de nuevo.");
+      await loadHistory().catch(() => undefined);
+    } finally { setDeletingJob(""); }
   };
   const deleteAllHistory = async () => {
     if (!history.length || !window.confirm(`¿Eliminar definitivamente los ${history.length} trabajos del historial y todos sus documentos asociados? Esta acción no se puede deshacer.`)) return;
-    setDeletingHistory(true); const response = await fetch("/api/jobs", { method: "DELETE" }); const body = await responseBody(response);
-    if (response.ok) { setHistory([]); setActiveJob(""); setResult(""); setAdaptedProject(null); } else window.alert(body.error || "No se pudo vaciar el historial.");
-    setDeletingHistory(false);
+    setDeletingHistory(true);
+    try {
+      const response = await fetch("/api/jobs", { method: "DELETE" });
+      const body = await responseBody(response);
+      if (!response.ok) throw new Error(body.error || "No se pudo vaciar el historial.");
+      setHistory([]); setActiveJob(""); setResult(""); setAdaptedProject(null);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "No se pudo vaciar el historial. Inténtalo de nuevo.");
+      await loadHistory().catch(() => undefined);
+    } finally { setDeletingHistory(false); }
   };
   const openAdmin = async () => { setShowAdmin(true); setAdminStatus("Consultando modelos disponibles…"); const response = await fetch("/api/admin/models"); const body = await responseBody(response); if (!response.ok) { setAdminStatus(body.error); return; } setModels(body.models); setSelectedModel(body.selected); setModelNote(body.note); setAdminStatus(""); };
   const saveModel = async () => { setAdminStatus("Guardando…"); const response = await fetch("/api/admin/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: selectedModel }) }); const body = await responseBody(response); setAdminStatus(response.ok ? `Modelo activo: ${body.selected}` : body.error); };
@@ -251,11 +293,11 @@ export default function Home() {
   return <main>
     <button type="button" className={`library-launch ${isAdmin ? "admin-visible" : "user-visible"}`} onClick={openLibrary}>◫ Biblioteca compartida</button>
     {showLibrary && <SharedLibrary ownProjects={history.filter((job) => job.kind.startsWith("project") && job.status === "completed")} projects={sharedProjects} busy={sharingProject} onClose={() => setShowLibrary(false)} onToggle={toggleProjectSharing} onCopy={copySharedProject} />}
-    {showHistory && history.length > 0 && <button type="button" className="history-delete-all" disabled={deletingHistory || history.some((job) => job.status === "generating")} onClick={deleteAllHistory}>{deletingHistory ? "Eliminando todo…" : `Eliminar todo (${history.length})`}</button>}
+    {showHistory && history.length > 0 && <button type="button" className="history-delete-all" disabled={deletingHistory} onClick={deleteAllHistory}>{deletingHistory ? "Eliminando todo…" : `Eliminar todo (${history.length})`}</button>}
     <header className="site-header">
       <button className="brand" onClick={() => go("home")} aria-label="Ir al inicio"><span className="brand-mark">A<span>+</span></span><span><strong>Adapta</strong><small>Docencia a medida</small><em>Manu Galán Marín</em></span></button>
       <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button></nav>
-      <div className="header-tools">{isAdmin && <button className="admin-button" onClick={openAdmin}>⚙ Administrador</button>}<button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button></div>
+      <div className="header-tools">{isAdmin && <button className="admin-button" onClick={openAdmin}>⚙ Administrador</button>}{unreadSharedCount > 0 && <button type="button" className="shared-notification" onClick={openSharedNotification} aria-label={`${unreadSharedCount} proyecto${unreadSharedCount === 1 ? "" : "s"} compartido${unreadSharedCount === 1 ? "" : "s"} sin leer`}><span aria-hidden="true">🔔</span><b>{unreadSharedCount}</b><small>Proyecto compartido</small></button>}<button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button></div>
     </header>
     {view === "home" && <div className="home-view">
       <section className="hero">

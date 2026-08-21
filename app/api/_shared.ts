@@ -35,6 +35,8 @@ export async function ensureSchema() {
     DB.prepare("CREATE TABLE IF NOT EXISTS user_settings (owner_email TEXT PRIMARY KEY NOT NULL, model TEXT DEFAULT 'gpt-5-mini' NOT NULL, updated_at INTEGER NOT NULL)"),
     DB.prepare("CREATE TABLE IF NOT EXISTS context_phrases (id TEXT PRIMARY KEY NOT NULL, owner_email TEXT NOT NULL, category TEXT NOT NULL, phrase TEXT NOT NULL, created_at INTEGER NOT NULL)"),
     DB.prepare("CREATE INDEX IF NOT EXISTS context_phrases_owner_idx ON context_phrases(owner_email, category)"),
+    DB.prepare("CREATE TABLE IF NOT EXISTS shared_project_reads (owner_email TEXT NOT NULL, project_id TEXT NOT NULL, read_at INTEGER NOT NULL, PRIMARY KEY (owner_email, project_id))"),
+    DB.prepare("CREATE INDEX IF NOT EXISTS shared_project_reads_owner_idx ON shared_project_reads(owner_email, read_at)"),
   ]);
   const columns = await DB.prepare("PRAGMA table_info(jobs)").all<{ name: string }>();
   const names = new Set(columns.results.map((column) => column.name));
