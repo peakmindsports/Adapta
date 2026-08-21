@@ -1,11 +1,36 @@
 import { AlignmentType, Document, HeadingLevel, ImageRun, Packer, PageBreak, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { decodePDFRawStream, PDFDocument, PDFName, PDFNumber, PDFRawStream, StandardFonts, rgb } from "pdf-lib";
 import UPNG from "@pdf-lib/upng";
+import jpeg from "jpeg-js";
 import { ensureSchema, jsonError, ownerFrom, runtime, safeFilename } from "../../../_shared";
 
 type Block = { type: "heading" | "bullet" | "checkbox" | "number" | "paragraph" | "tableRow" | "card" | "break" | "image" | "match"; text: string; second?: string; level?: number };
 type SourceImage = { bytes: Uint8Array; width: number; height: number; type: "jpg" | "png" };
 type CoverDetails = { subject?: string | null; student?: string | null; course?: string | null; academicYear?: string | null };
+
+function isDecorativeTexture(pixels: Uint8Array, width: number, height: number, channels = 4) {
+  const pixelCount = width * height; const step = Math.max(1, Math.floor(pixelCount / 12000));
+  let samples = 0; let luminanceSum = 0; let luminanceSquaredSum = 0; let edgeSum = 0; let previousLuminance: number | null = null;
+  for (let pixel = 0; pixel < pixelCount; pixel += step) {
+    const offset = pixel * channels; const red = pixels[offset]; const green = pixels[offset + 1]; const blue = pixels[offset + 2];
+    const luminance = .299 * red + .587 * green + .114 * blue; samples += 1; luminanceSum += luminance; luminanceSquaredSum += luminance * luminance;
+    if (previousLuminance !== null) edgeSum += Math.abs(luminance - previousLuminance); previousLuminance = luminance;
+  }
+  if (samples < 2) return true;
+  const mean = luminanceSum / samples; const deviation = Math.sqrt(Math.max(0, luminanceSquaredSum / samples - mean * mean)); const averageEdge = edgeSum / (samples - 1);
+  return deviation < 24 && averageEdge < 27;
+}
+
+function isUsefulJpeg(bytes: Uint8Array) {
+  try { const decoded = jpeg.decode(bytes, { useTArray: true, formatAsRGBA: true }); return !isDecorativeTexture(decoded.data, decoded.width, decoded.height); }
+  catch { return false; }
+}
+
+function imageFingerprint(image: SourceImage) {
+  let hash = 2166136261; const step = Math.max(1, Math.floor(image.bytes.length / 2048));
+  for (let index = 0; index < image.bytes.length; index += step) { hash ^= image.bytes[index]; hash = Math.imul(hash, 16777619); }
+  return `${image.type}:${image.width}:${image.height}:${image.bytes.length}:${hash >>> 0}`;
+}
 
 function cleanMarkdown(value: string) {
   return value.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/__([^_]+)__/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/^>\s?/, "").trim();
@@ -189,7 +214,7 @@ function requiredImages(markdown: string) {
 
 async function sourceImages(jobId: string, owner: string, requested: number[] = [], needs = new Map<number, number>()) {
   const rows = await runtime().DB.prepare("SELECT content_type, storage_key FROM job_files WHERE job_id = ? AND owner_email = ? AND category = 'unidades' ORDER BY created_at").bind(jobId, owner).all<{ content_type: string; storage_key: string }>();
-  const selected: Array<SourceImage | null> = [];
+  const selected: Array<SourceImage | null> = []; const seenImages = new Set<string>();
   for (const [index, row] of rows.results.entries()) {
     const unitNumber = index + 1; if (requested.length && !requested.includes(unitNumber)) continue; const needed = needs.get(unitNumber) || 0; if (!needed) continue;
     try {
@@ -205,17 +230,17 @@ async function sourceImages(jobId: string, owner: string, requested: number[] = 
         const width = object.dict.lookupMaybe(PDFName.of("Width"), PDFNumber)?.asNumber() || 0; const height = object.dict.lookupMaybe(PDFName.of("Height"), PDFNumber)?.asNumber() || 0;
         const ratio = width / height; const colorSpace = String(object.dict.get(PDFName.of("ColorSpace"))); const hasMask = object.dict.has(PDFName.of("SMask")) || object.dict.has(PDFName.of("Mask")); const looksLikePage = width * height > 1500000 && ratio > .64 && ratio < .78; const filterName = String(filter);
         if (width < 240 || height < 160 || ratio < .28 || ratio > 3.6 || looksLikePage || colorSpace === "/DeviceGray" || colorSpace === "/DeviceCMYK") continue;
-        if (filterName.includes("/DCTDecode") && !hasMask) candidates.push({ bytes: object.getContents(), width, height, type: "jpg" });
+        if (filterName.includes("/DCTDecode") && !hasMask) { const jpegBytes = object.getContents(); if (isUsefulJpeg(jpegBytes)) candidates.push({ bytes: jpegBytes, width, height, type: "jpg" }); }
         else if (filterName.includes("/FlateDecode") && width * height <= 5000000) {
           const decoded = decodePDFRawStream(object).decode(); const pixels = width * height; const rgba = new Uint8Array(pixels * 4); if (colorSpace !== "/DeviceRGB" || decoded.length < pixels * 3) continue; let colored = 0; let visible = 0;
           const softMask = object.dict.lookupMaybe(PDFName.of("SMask"), PDFRawStream); let alpha: Uint8Array | null = null; if (softMask) { try { const decodedMask = decodePDFRawStream(softMask).decode(); if (decodedMask.length >= pixels) alpha = decodedMask; } catch { alpha = null; } }
           for (let pixel = 0; pixel < pixels; pixel += 1) { const red = decoded[pixel * 3]; const green = decoded[pixel * 3 + 1]; const blue = decoded[pixel * 3 + 2]; rgba[pixel * 4] = red; rgba[pixel * 4 + 1] = green; rgba[pixel * 4 + 2] = blue; rgba[pixel * 4 + 3] = alpha?.[pixel] ?? 255; if (Math.max(red, green, blue) - Math.min(red, green, blue) > 12) colored += 1; if (red + green + blue < 735 && (alpha?.[pixel] ?? 255) > 20) visible += 1; }
-          if (colored / pixels < .025 || visible / pixels < .06) continue;
+          if (colored / pixels < .025 || visible / pixels < .06 || isDecorativeTexture(rgba, width, height)) continue;
           candidates.push({ bytes: new Uint8Array(UPNG.encode([rgba.buffer], width, height, 0)), width, height, type: "png" });
         }
       }
-      const unique = candidates.filter((candidate, candidateIndex, all) => all.findIndex((other) => other.width === candidate.width && other.height === candidate.height && other.bytes.length === candidate.bytes.length) === candidateIndex).sort((left, right) => right.width * right.height - left.width * left.height);
-      const chosen = unique.slice(0, needed); selected.push(...chosen, ...Array(Math.max(0, needed - chosen.length)).fill(null));
+      const localFingerprints = new Set<string>(); const unique = candidates.filter((candidate) => { const fingerprint = imageFingerprint(candidate); if (localFingerprints.has(fingerprint) || seenImages.has(fingerprint)) return false; localFingerprints.add(fingerprint); return true; }).sort((left, right) => right.width * right.height - left.width * left.height);
+      const chosen = unique.slice(0, needed); chosen.forEach((image) => seenImages.add(imageFingerprint(image))); selected.push(...chosen, ...Array(Math.max(0, needed - chosen.length)).fill(null));
     } catch { selected.push(...Array(needed).fill(null)); /* Un PDF sin imágenes utilizables no desplaza imágenes de otra UDI. */ }
   }
   return selected;
