@@ -4,5 +4,3 @@ CREATE TABLE `shared_project_reads` (
 	`read_at` integer NOT NULL,
 	PRIMARY KEY(`owner_email`, `project_id`)
 );
---> statement-breakpoint
-ALTER TABLE `jobs` ADD `shared_at` integer;
