@@ -67,11 +67,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const contextFiles = preparedFiles.filter((file) => file.category !== "unidades");
       if (!units.length) throw new Error("Añade las unidades didácticas del curso actual para generar el libro adaptado.");
       const contextSummaries: string[] = [];
-      for (let index = 0; index < contextFiles.length; index += 8) {
-        const batch = contextFiles.slice(index, index + 8);
-        contextSummaries.push(await callModel([{ type: "input_text", text: `Analiza estos documentos según su categoría:\n${batch.map((file) => `- ${file.category}: ${file.filename}`).join("\n")}\nDistingue: (a) dictámenes y medidas; (b) programación anual por unidad; (c) materiales del nivel de referencia; y (d) selección de criterios por unidad. Esta última representa la prioridad expresa del equipo docente y debe prevalecer al diseñar actividades, pruebas, evidencias y productos finales. No añadas otros criterios como obligatorios. Produce un mapa curricular fiel, sin diagnosticar ni inventar datos.` }, ...batch.map((file) => ({ type: "input_file", file_id: file.id }))], 4500));
+      for (const file of contextFiles) {
+        contextSummaries.push(await callModel([{ type: "input_text", text: `Analiza exclusivamente este documento (${file.category}: ${file.filename}). Extrae de forma compacta la información útil por unidad. Si es una selección de criterios, conserva literalmente los códigos, descriptores y UDI asociadas porque representan la prioridad del equipo docente. Si es programación, recoge objetivos, saberes, competencias y criterios; si es informe, medidas y apoyos; si es material de nivel, formato, lenguaje y dificultad. No diagnostiques ni inventes datos.` }, { type: "input_file", file_id: file.id }], 1800));
       }
-      const sharedContext = `${personalContext}\n${contextSummaries.join("\n\n")}`;
+      const sharedContext = `${personalContext}\n${contextSummaries.join("\n\n")}`.slice(0, 250000);
       const chapters = new Array<string>(units.length);
       let nextUnit = 0;
       await Promise.all(Array.from({ length: Math.min(1, units.length) }, async () => {
@@ -87,23 +86,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       await DB.prepare("UPDATE jobs SET title = ?, status = 'completed', result = ?, updated_at = ? WHERE id = ?").bind(`Libro adaptado · ${job.student_name}`, result, Date.now(), id).run();
       return Response.json({ result });
     }
-    let finalContent = content;
-    if (openAIFileIds.length > 10) {
-      const summaries: string[] = [];
-      for (let index = 0; index < openAIFileIds.length; index += 8) {
-        const batch = openAIFileIds.slice(index, index + 8);
-        const batchContent = [{ type: "input_text", text: `Analiza estos documentos educativos (lote ${Math.floor(index / 8) + 1}). Resume de forma fiel: estructura de las unidades, contenidos, criterios, metodología, actividades, recursos, nivel de dificultad y elementos visuales. Conserva títulos y diferencias entre documentos. Este resumen se utilizará después para diseñar una propuesta curricular.` }, ...batch.map((fileId) => ({ type: "input_file", file_id: fileId }))];
-        const summaryResponse = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: [{ role: "user", content: batchContent }], max_output_tokens: 3500 }) });
-        const summaryData = await summaryResponse.json() as any;
-        if (!summaryResponse.ok) throw new Error(summaryData?.error?.message || "No se pudo analizar uno de los lotes de documentos.");
-        summaries.push(extractText(summaryData));
-      }
-      finalContent = [{ type: "input_text", text: `${content[0].text}\n\nANÁLISIS DE LOS DOCUMENTOS APORTADOS:\n${summaries.map((summary, index) => `\n--- LOTE ${index + 1} ---\n${summary}`).join("\n")}` }];
+    const summaries: string[] = [];
+    for (const file of preparedFiles) {
+      summaries.push(await callModel([{ type: "input_text", text: `Analiza exclusivamente “${file.filename}”, clasificado como ${file.category}. Resume de forma compacta estructura, UDI, contenidos, competencias, criterios, metodología, actividades, recursos y elementos visuales. Si contiene criterios seleccionados, conserva exactamente códigos, descriptores, unidad y asignatura. Este resumen se integrará después en un proyecto interdisciplinar.` }, { type: "input_file", file_id: file.id }], 1500));
     }
-    const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: [{ role: "user", content: finalContent }], max_output_tokens: 9000 }) });
-    const data = await response.json() as any;
-    if (!response.ok) throw new Error(data?.error?.message || "No se pudo generar la propuesta.");
-    const result = extractText(data);
+    const synthesis = `${content[0].text}\n\nANÁLISIS INDIVIDUAL DE LOS DOCUMENTOS:\n${summaries.map((summary, index) => `\n--- ${preparedFiles[index].category.toUpperCase()} · ${preparedFiles[index].filename} ---\n${summary}`).join("\n")}`.slice(0, 300000);
+    const result = await callModel([{ type: "input_text", text: synthesis }], 9000);
     if (!result) throw new Error("La IA no devolvió contenido utilizable.");
     await DB.prepare("UPDATE jobs SET status = 'completed', result = ?, updated_at = ? WHERE id = ?").bind(result, Date.now(), id).run();
     return Response.json({ result });
