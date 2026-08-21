@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 type View = "home" | "adaptacion" | "proyecto";
 type UploadKey = "dictamen" | "programacion" | "criterios" | "unidades" | "material" | "proyecto" | "project_math" | "project_math_criteria" | "project_language" | "project_language_criteria" | "project_science" | "project_science_criteria" | "project_english" | "project_english_criteria";
-type Job = { id: string; kind: string; title: string; studentName?: string; currentCourse?: string; targetCourse?: string; subject?: string; academicYear?: string; teacherName?: string; status: string; createdAt: number; result?: string };
+type Job = { id: string; kind: string; title: string; studentName?: string; currentCourse?: string; targetCourse?: string; subject?: string; academicYear?: string; teacherName?: string; status: string; sharedAt?: number | null; createdAt: number; result?: string };
+type SharedProject = { id: string; title: string; kind: string; currentCourse?: string; targetCourse?: string; academicYear?: string; teacherName?: string; ownerEmail?: string; sharedAt: number; isMine: boolean };
 type ApiModel = { id: string; label: string; cost: string; rank: number };
 type StudentContext = { strengths: string; classroomContext: string; familyContext: string; effectiveSupports: string; notes: string };
 type BatchStudent = { id: string; name: string; currentCourse: string; targetCourse: string; reports: File[]; levelMaterial: File[]; context: StudentContext; assessing: boolean; recommendation?: string };
@@ -59,6 +60,10 @@ function BatchStudentContext({ student, onChange }: { student: BatchStudent; onC
   return <details className="student-specific-context"><summary>Contexto personal y educativo <span>Información independiente de esta persona</span></summary><p>Incluye solo información relevante para la intervención educativa y describe situaciones observables.</p><div className="student-context-grid"><div className="notes-field"><label>Fortalezas, intereses y motivadores <span>Opcional</span></label><textarea value={student.context.strengths} onChange={(event) => update("strengths", event.target.value)} placeholder="Intereses, capacidades y actividades que le motivan…" /><PhraseDropdown category="strengths" onPick={(phrase) => append("strengths", phrase)} /></div><div className="notes-field"><label>Situaciones en el aula y necesidades de apoyo <span>Opcional</span></label><textarea value={student.context.classroomContext} onChange={(event) => update("classroomContext", event.target.value)} placeholder="Atención, autonomía, comunicación o situaciones observables…" /><PhraseDropdown category="classroom" onPick={(phrase) => append("classroomContext", phrase)} /></div><div className="notes-field"><label>Contexto familiar relevante <span>Opcional</span></label><textarea value={student.context.familyContext} onChange={(event) => update("familyContext", event.target.value)} placeholder="Rutinas, coordinación, idiomas o disponibilidad de apoyo…" /><PhraseDropdown category="family" onPick={(phrase) => append("familyContext", phrase)} /></div><div className="notes-field"><label>Estrategias que funcionan y situaciones a evitar <span>Opcional</span></label><textarea value={student.context.effectiveSupports} onChange={(event) => update("effectiveSupports", event.target.value)} placeholder="Anticipación, descansos, apoyos visuales o ajustes…" /><PhraseDropdown category="supports" onPick={(phrase) => append("effectiveSupports", phrase)} /></div><div className="notes-field student-context-notes"><label>Otras indicaciones para su adaptación <span>Opcional</span></label><textarea value={student.context.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Prioridades o indicaciones específicas para esta persona…" /></div></div></details>;
 }
 
+function SharedLibrary({ ownProjects, projects, busy, onClose, onToggle, onCopy }: { ownProjects: Job[]; projects: SharedProject[]; busy: string; onClose: () => void; onToggle: (job: Job) => void; onCopy: (project: SharedProject) => void }) {
+  return <div className="history-overlay shared-library-overlay" onClick={onClose}><aside className="history-panel shared-library" onClick={(event) => event.stopPropagation()}><button className="history-close" onClick={onClose}>×</button><span className="section-kicker blue-ink">BIBLIOTECA DEL EQUIPO</span><h2>Proyectos compartidos</h2><p>Comparte únicamente el proyecto final. La documentación original y los datos del alumnado permanecen privados.</p><section><h3>Mis proyectos</h3><div className="shared-project-list">{ownProjects.length ? ownProjects.map((job) => <article key={job.id}><div><strong>{job.title}</strong><small>{[job.currentCourse, job.academicYear, job.teacherName].filter(Boolean).join(" · ")}</small></div><button type="button" className={job.sharedAt ? "unshare" : "share"} disabled={busy === job.id} onClick={() => onToggle(job)}>{busy === job.id ? "Guardando…" : job.sharedAt ? "Dejar de compartir" : "Compartir con el equipo"}</button></article>) : <div className="empty-history">Todavía no tienes proyectos terminados para compartir.</div>}</div></section><section><h3>Compartidos por el equipo</h3><div className="shared-project-list">{projects.length ? projects.map((project) => <article key={project.id}><div><strong>{project.title}</strong><small>{[project.currentCourse || project.targetCourse, project.academicYear, project.teacherName || project.ownerEmail].filter(Boolean).join(" · ")}</small></div>{project.isMine ? <span className="mine-label">Tu proyecto</span> : <button type="button" className="copy-shared" disabled={busy === project.id} onClick={() => onCopy(project)}>{busy === project.id ? "Creando copia…" : "Guardar una copia"}</button>}</article>) : <div className="empty-history">Aún no hay proyectos compartidos por el equipo.</div>}</div></section></aside></div>;
+}
+
 export default function Home() {
   const [view, setView] = useState<View>("home");
   const viewRef = useRef<View>("home");
@@ -97,6 +102,9 @@ export default function Home() {
   const [historySubject, setHistorySubject] = useState("");
   const [historyLevel, setHistoryLevel] = useState("");
   const [historyYear, setHistoryYear] = useState("");
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [sharedProjects, setSharedProjects] = useState<SharedProject[]>([]);
+  const [sharingProject, setSharingProject] = useState("");
   const [showAdmin, setShowAdmin] = useState(false);
   const [models, setModels] = useState<ApiModel[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
@@ -117,6 +125,10 @@ export default function Home() {
   const go = (next: View) => { setNotice(""); if (!processing) { setResult(""); setActiveJob(""); setAdaptedProject(null); setProgress(0); setProgressLabel(""); } viewRef.current = next; setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const loadHistory = async () => { const response = await fetch("/api/jobs"); if (response.ok) setHistory((await response.json()).jobs); };
   const openHistory = async () => { await loadHistory(); setShowHistory(true); };
+  const loadSharedProjects = async () => { const response = await fetch("/api/shared-projects"); if (response.ok) setSharedProjects((await response.json()).projects); };
+  const openLibrary = async () => { await Promise.all([loadHistory(), loadSharedProjects()]); setShowLibrary(true); };
+  const toggleProjectSharing = async (job: Job) => { setSharingProject(job.id); const response = await fetch(`/api/jobs/${job.id}/share`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shared: !job.sharedAt }) }); const body = await responseBody(response); if (response.ok) { setHistory((items) => items.map((item) => item.id === job.id ? { ...item, sharedAt: body.sharedAt } : item)); await loadSharedProjects(); } else window.alert(body.error || "No se pudo cambiar el estado del proyecto."); setSharingProject(""); };
+  const copySharedProject = async (project: SharedProject) => { setSharingProject(project.id); const response = await fetch("/api/shared-projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: project.id }) }); const body = await responseBody(response); if (response.ok) { await loadHistory(); setShowLibrary(false); window.alert("El proyecto se ha guardado como una copia independiente en tu historial."); } else window.alert(body.error || "No se pudo copiar el proyecto."); setSharingProject(""); };
   const visibleHistory = history.filter((job) => {
     const query = historySearch.trim().toLocaleLowerCase("es");
     const searchable = [job.title, job.studentName, job.teacherName, job.subject, job.currentCourse, job.targetCourse].filter(Boolean).join(" ").toLocaleLowerCase("es");
@@ -235,6 +247,8 @@ export default function Home() {
   };
 
   return <main>
+    <button type="button" className="library-launch" onClick={openLibrary}>◫ Biblioteca compartida</button>
+    {showLibrary && <SharedLibrary ownProjects={history.filter((job) => job.kind.startsWith("project") && job.status === "completed")} projects={sharedProjects} busy={sharingProject} onClose={() => setShowLibrary(false)} onToggle={toggleProjectSharing} onCopy={copySharedProject} />}
     {showHistory && history.length > 0 && <button type="button" className="history-delete-all" disabled={deletingHistory || history.some((job) => job.status === "generating")} onClick={deleteAllHistory}>{deletingHistory ? "Eliminando todo…" : `Eliminar todo (${history.length})`}</button>}
     <header className="site-header">
       <button className="brand" onClick={() => go("home")} aria-label="Ir al inicio"><span className="brand-mark">A<span>+</span></span><span><strong>Adapta</strong><small>Docencia a medida</small><em>Manu Galán Marín</em></span></button>

@@ -3,7 +3,7 @@ import { ensureSchema, jsonError, ownerFrom, runtime } from "../_shared";
 export async function GET(request: Request) {
   await ensureSchema();
   const owner = ownerFrom(request);
-  const rows = await runtime().DB.prepare("SELECT id, kind, title, student_name AS studentName, current_course AS currentCourse, target_course AS targetCourse, subject, academic_year AS academicYear, teacher_name AS teacherName, status, created_at AS createdAt, updated_at AS updatedAt FROM jobs WHERE owner_email = ? ORDER BY created_at DESC").bind(owner).all();
+  const rows = await runtime().DB.prepare("SELECT id, kind, title, student_name AS studentName, current_course AS currentCourse, target_course AS targetCourse, subject, academic_year AS academicYear, teacher_name AS teacherName, status, shared_at AS sharedAt, created_at AS createdAt, updated_at AS updatedAt FROM jobs WHERE owner_email = ? ORDER BY created_at DESC").bind(owner).all();
   return Response.json({ jobs: rows.results });
 }
 

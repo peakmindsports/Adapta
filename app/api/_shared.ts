@@ -38,6 +38,7 @@ export async function ensureSchema() {
     ["subject", "ALTER TABLE jobs ADD COLUMN subject TEXT"],
     ["academic_year", "ALTER TABLE jobs ADD COLUMN academic_year TEXT"],
     ["teacher_name", "ALTER TABLE jobs ADD COLUMN teacher_name TEXT"],
+    ["shared_at", "ALTER TABLE jobs ADD COLUMN shared_at INTEGER"],
   ] as const;
   for (const [name, sql] of additions) if (!names.has(name)) await DB.prepare(sql).run();
 }
