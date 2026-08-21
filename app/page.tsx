@@ -28,13 +28,13 @@ function SubjectIcon({ type, compact = false }: { type: "math" | "language" | "s
   </span>;
 }
 
-function UploadBox({ id, eyebrow, title, description, files, onFiles, optional = false }: { id: UploadKey; eyebrow: string; title: string; description: string; files: File[]; onFiles: (id: UploadKey, files: File[]) => void; optional?: boolean }) {
+function UploadBox({ id, eyebrow, title, description, files, onFiles, optional = false }: { id: UploadKey; eyebrow: string; title: string; description: string; files: File[]; onFiles: (id: UploadKey, files: File[], replace?: boolean) => void; optional?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   return <div className={`upload-box ${files.length ? "has-files" : ""}`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); onFiles(id, Array.from(e.dataTransfer.files)); }}>
-    <input ref={input} type="file" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png" onChange={(e) => onFiles(id, Array.from(e.target.files ?? []))} />
+    <input ref={input} type="file" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png" onChange={(e) => { onFiles(id, Array.from(e.target.files ?? [])); e.target.value = ""; }} />
     <div className="upload-icon" aria-hidden="true">↥</div>
     <div className="upload-copy"><span className="eyebrow">{eyebrow}{optional && <em>Opcional</em>}</span><h3>{title}</h3><p>{description}</p>
-      {files.length > 0 && <div className="file-list">{files.slice(0, 3).map((file) => <span key={`${file.name}-${file.size}`}>✓ {file.name}</span>)}{files.length > 3 && <span>+ {files.length - 3} archivos más</span>}</div>}
+      {files.length > 0 && <div className="file-list">{files.map((file, index) => <span key={`${file.name}-${file.size}-${index}`} title={file.name}>✓ <i>{file.name}</i><button type="button" aria-label={`Eliminar ${file.name}`} title={`Eliminar ${file.name}`} onClick={() => onFiles(id, files.filter((_, fileIndex) => fileIndex !== index), true)}>×</button></span>)}</div>}
     </div>
     <button type="button" className="file-button" onClick={() => input.current?.click()}>{files.length ? "Añadir más" : "Seleccionar"}</button>
   </div>;
@@ -81,7 +81,7 @@ export default function Home() {
   const [adaptedProject, setAdaptedProject] = useState<{ result: string; jobId: string } | null>(null);
   const [projectSubject, setProjectSubject] = useState<"project_math" | "project_language" | "project_science" | "project_english">("project_math");
   const [recommendation, setRecommendation] = useState<{ recommendedCourse: string; explanation: string; confidence: string; caveat: string } | null>(null);
-  const addFiles = (key: UploadKey, incoming: File[]) => setFiles((current) => ({ ...current, [key]: [...current[key], ...incoming] }));
+  const addFiles = (key: UploadKey, incoming: File[], replace = false) => setFiles((current) => ({ ...current, [key]: replace ? incoming : [...current[key], ...incoming] }));
   const go = (next: View) => { setNotice(""); if (!processing) { setResult(""); setActiveJob(""); setAdaptedProject(null); setProgress(0); setProgressLabel(""); } viewRef.current = next; setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const loadHistory = async () => { const response = await fetch("/api/jobs"); if (response.ok) setHistory((await response.json()).jobs); };
   const openHistory = async () => { await loadHistory(); setShowHistory(true); };
