@@ -401,8 +401,18 @@ export default function Home() {
 
 function HistoryDownloadMenu({ job }: { job: Job }) {
   const [scope, setScope] = useState<"all" | "student" | "teacher">("all");
-  const scopeLabel = scope === "student" ? "Alumnado" : scope === "teacher" ? "Docente" : "Documento completo";
-  return <details className="history-download-menu"><summary>Descargar</summary><div><label htmlFor={`history-scope-${job.id}`}>Contenido</label><select id={`history-scope-${job.id}`} value={scope} onChange={(event) => setScope(event.target.value as "all" | "student" | "teacher")}><option value="student">Documento del alumnado</option><option value="teacher">Documento del docente</option><option value="all">Ambos · documento completo</option></select><small>Se descargará: <strong>{scopeLabel}</strong></small><span><a href={`/api/jobs/${job.id}/download?format=pdf&scope=${scope}`}>PDF</a><a href={`/api/jobs/${job.id}/download?format=docx&scope=${scope}`}>Word</a></span></div></details>;
+  const [downloading, setDownloading] = useState<"pdf" | "docx" | "">("");
+  const [downloadError, setDownloadError] = useState("");
+  const choices: Array<{ value: "student" | "teacher" | "all"; label: string }> = [{ value: "student", label: "Alumnado" }, { value: "teacher", label: "Docente" }, { value: "all", label: "Ambos" }];
+  const download = async (format: "pdf" | "docx") => {
+    setDownloading(format); setDownloadError("");
+    try {
+      const response = await fetch(`/api/jobs/${job.id}/download?format=${format}&scope=${scope}`);
+      if (!response.ok) { const body = await response.text(); try { throw new Error(JSON.parse(body).error || "No se pudo preparar el documento."); } catch (error) { if (error instanceof SyntaxError) throw new Error("No se pudo preparar el documento. Inténtalo de nuevo."); throw error; } }
+      const blob = await response.blob(); const disposition = response.headers.get("Content-Disposition") || ""; const match = disposition.match(/filename="([^"]+)"/i); const extension = format === "docx" ? "docx" : "pdf"; const filename = match?.[1] || `Adapta-${scope}.${extension}`; const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) { setDownloadError(error instanceof Error ? error.message : "No se pudo descargar el documento."); } finally { setDownloading(""); }
+  };
+  return <details className="history-download-menu"><summary>Descargar</summary><div><span className="history-scope-label">Elige el contenido</span><div className="history-scope-options" role="group" aria-label="Contenido del documento">{choices.map((choice) => <button type="button" key={choice.value} className={scope === choice.value ? "selected" : ""} aria-pressed={scope === choice.value} onClick={() => { setScope(choice.value); setDownloadError(""); }}>{choice.label}</button>)}</div><small>{scope === "student" ? "Solo actividades y material entregable al alumnado." : scope === "teacher" ? "Solo guías, soluciones e instrumentos de evaluación." : "Parte del alumnado y anexo docente en un único archivo."}</small><span className="history-format-options"><button type="button" disabled={Boolean(downloading)} onClick={() => download("pdf")}>{downloading === "pdf" ? "Preparando…" : "PDF"}</button><button type="button" disabled={Boolean(downloading)} onClick={() => download("docx")}>{downloading === "docx" ? "Preparando…" : "Word"}</button></span>{downloadError && <p className="history-download-error" role="alert">{downloadError}</p>}</div></details>;
 }
 function ResultPanel({ result, jobId }: { result: string; jobId: string }) {
   const separateAudience = /^#\s+(?:Libro|Recurso) anual adaptado/im.test(result);
