@@ -8,6 +8,34 @@ function extractText(data: any): string {
   return (data.output ?? []).flatMap((item: any) => item.content ?? []).filter((part: any) => part.type === "output_text").map((part: any) => part.text).join("\n");
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitForOpenAIFile(fileId: string, apiKey: string, filename: string) {
+  const deadline = Date.now() + 60000;
+  let lastMessage = "";
+  while (Date.now() < deadline) {
+    const response = await fetch(`https://api.openai.com/v1/files/${fileId}`, { headers: { Authorization: `Bearer ${apiKey}` } });
+    const file = await response.json() as any;
+    if (response.ok) {
+      if (file.status === "error") throw new Error(file.status_details || `OpenAI no pudo procesar “${filename}”.`);
+      // Newer File objects omit the deprecated status once the file is available.
+      if (!file.status || file.status === "processed") return;
+      lastMessage = file.status_details || `Estado del archivo: ${file.status}`;
+    } else if (response.status !== 404 && response.status !== 409 && response.status < 500) {
+      throw new Error(file?.error?.message || `No se pudo comprobar “${filename}” en OpenAI.`);
+    } else {
+      lastMessage = file?.error?.message || `OpenAI todavía no reconoce “${filename}”.`;
+    }
+    await sleep(2000);
+  }
+  throw new Error(lastMessage || `OpenAI tardó demasiado en preparar “${filename}”.`);
+}
+
+function isTemporaryOpenAIError(status: number, message: string) {
+  return status === 408 || status === 409 || status === 429 || status >= 500
+    || /unknown error while validating file ownership|validating file ownership|file.*(?:not (?:yet )?(?:available|ready|found)|still (?:processing|being processed))|try again/i.test(message);
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   await ensureSchema();
   const { id } = await context.params;
@@ -40,6 +68,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const uploaded = await uploadedResponse.json() as any;
       if (!uploadedResponse.ok || !uploaded.id) throw new Error(uploaded?.error?.message || `No se pudo preparar “${row.filename}” para el análisis.`);
       openAIFileIds.push(uploaded.id);
+      await waitForOpenAIFile(uploaded.id, OPENAI_API_KEY, row.filename);
       preparedFiles.push({ id: uploaded.id, filename: row.filename, category: row.category });
       content.push({ type: "input_file", file_id: uploaded.id });
     }
@@ -50,15 +79,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email IN (?, ?) ORDER BY CASE WHEN owner_email = ? THEN 0 ELSE 1 END LIMIT 1").bind(GLOBAL_MODEL_OWNER, SITE_ADMIN_EMAIL, GLOBAL_MODEL_OWNER).first<{ model: string }>();
     const model = setting?.model || OPENAI_MODEL || "gpt-5-mini";
     const callModel = async (requestContent: any[], maxOutputTokens: number) => {
-      for (let attempt = 0; attempt < 5; attempt++) {
+      for (let attempt = 0; attempt < 6; attempt++) {
         const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: [{ role: "user", content: requestContent }], max_output_tokens: maxOutputTokens }) });
         const data = await response.json() as any;
         if (response.ok) return extractText(data);
-        if (response.status !== 429 || attempt === 4) throw new Error(data?.error?.message || "No se pudo completar una parte del libro.");
         const message = data?.error?.message || "";
+        if (!isTemporaryOpenAIError(response.status, message) || attempt === 5) throw new Error(message || "No se pudo completar una parte del libro.");
         const suggestedSeconds = Number(response.headers.get("retry-after")) || Number(message.match(/try again in ([\d.]+)s/i)?.[1]) || 15;
-        const waitMs = Math.min(60000, Math.max(10000, Math.ceil(suggestedSeconds * 1000) + 2000));
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        const fallbackMs = Math.min(20000, 2000 * 2 ** attempt);
+        const waitMs = response.status === 429 ? Math.min(60000, Math.max(10000, Math.ceil(suggestedSeconds * 1000) + 2000)) : fallbackMs;
+        await sleep(waitMs);
       }
       throw new Error("No se pudo completar una parte del libro tras varios reintentos.");
     };
