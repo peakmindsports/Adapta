@@ -407,7 +407,7 @@ function HistoryDownloadMenu({ job }: { job: Job }) {
   const download = async (format: "pdf" | "docx") => {
     setDownloading(format); setDownloadError("");
     try {
-      const response = await fetch(`/api/jobs/${job.id}/download?format=${format}&scope=${scope}`);
+      const downloadUrl = `/api/jobs/${job.id}/download?format=${format}&scope=${scope}`; let response = await fetch(downloadUrl); if (!response.ok) response = await fetch(`${downloadUrl}&safe=1`);
       if (!response.ok) { const body = await response.text(); try { throw new Error(JSON.parse(body).error || "No se pudo preparar el documento."); } catch (error) { if (error instanceof SyntaxError) throw new Error("No se pudo preparar el documento. Inténtalo de nuevo."); throw error; } }
       const blob = await response.blob(); const disposition = response.headers.get("Content-Disposition") || ""; const match = disposition.match(/filename="([^"]+)"/i); const extension = format === "docx" ? "docx" : "pdf"; const filename = match?.[1] || `Adapta-${scope}.${extension}`; const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) { setDownloadError(error instanceof Error ? error.message : "No se pudo descargar el documento."); } finally { setDownloading(""); }
