@@ -3,15 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import UserManual from "./manual";
 
-type View = "home" | "adaptacion" | "proyecto";
+type View = "home" | "adaptacion" | "proyecto" | "orientacion";
 type UploadKey = "dictamen" | "programacion" | "criterios" | "unidades" | "material" | "proyecto" | "project_math" | "project_math_criteria" | "project_language" | "project_language_criteria" | "project_science" | "project_science_criteria" | "project_english" | "project_english_criteria";
 type Job = { id: string; kind: string; title: string; studentName?: string; currentCourse?: string; targetCourse?: string; subject?: string; academicYear?: string; teacherName?: string; status: string; sharedAt?: number | null; createdAt: number; updatedAt: number; result?: string };
 type SharedProject = { id: string; title: string; kind: string; currentCourse?: string; targetCourse?: string; academicYear?: string; teacherName?: string; ownerEmail?: string; sharedAt: number; isMine: boolean; isRead: boolean };
 type ApiModel = { id: string; label: string; cost: string; rank: number };
 type StudentContext = { strengths: string; classroomContext: string; familyContext: string; effectiveSupports: string; notes: string };
 type BatchStudent = { id: string; name: string; currentCourse: string; targetCourse: string; reports: File[]; levelMaterial: File[]; context: StudentContext; assessing: boolean; recommendation?: string };
+type OrientationLevel = { id: string; targetCourse: string; material: File[] };
+type OrientationResult = { jobId: string; result: string; level: string };
 const emptyStudentContext = (): StudentContext => ({ strengths: "", classroomContext: "", familyContext: "", effectiveSupports: "", notes: "" });
 const newBatchStudent = (): BatchStudent => ({ id: crypto.randomUUID(), name: "", currentCourse: "", targetCourse: "", reports: [], levelMaterial: [], context: emptyStudentContext(), assessing: false });
+const newOrientationLevel = (): OrientationLevel => ({ id: crypto.randomUUID(), targetCourse: "", material: [] });
 const courses = ["1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO", "3º de ESO", "4º de ESO"];
 const subjects = ["Matemáticas", "Lengua Castellana", "Conocimiento del Medio", "Inglés", "Educación Artística", "Educación Física", "Otra"];
 const today = new Date();
@@ -77,6 +80,8 @@ export default function Home() {
     newBatchStudent(),
   ]);
   const [batchResults, setBatchResults] = useState<Array<{ jobId: string; result: string; names: string; level: string }>>([]);
+  const [orientationLevels, setOrientationLevels] = useState<OrientationLevel[]>([newOrientationLevel()]);
+  const [orientationResults, setOrientationResults] = useState<OrientationResult[]>([]);
   const [currentCourse, setCurrentCourse] = useState("");
   const [targetCourse, setTargetCourse] = useState("");
   const [subject, setSubject] = useState("");
@@ -255,6 +260,41 @@ export default function Home() {
       setBatchResults(createdResults); setProgress(100); setProgressLabel(`${createdResults.length} adaptación${createdResults.length === 1 ? "" : "es"} creadas y guardadas`); setNotice(`${ready.length} estudiantes agrupados en ${createdResults.length} adaptación${createdResults.length === 1 ? "" : "es"} según su curso y nivel.`); await loadHistory();
     } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudieron crear las adaptaciones múltiples."); } finally { setProcessing(false); }
   };
+  const updateOrientationLevel = (id: string, patch: Partial<OrientationLevel>) => setOrientationLevels((levels) => levels.map((level) => level.id === id ? { ...level, ...patch } : level));
+  const addOrientationLevel = () => setOrientationLevels((levels) => [...levels, newOrientationLevel()]);
+  const removeOrientationLevel = (id: string) => setOrientationLevels((levels) => levels.length > 1 ? levels.filter((level) => level.id !== id) : levels);
+  const generateOrientation = async () => {
+    setNotice(""); setOrientationResults([]); setProgress(0); setProgressLabel("");
+    const ready = orientationLevels.filter((level) => level.targetCourse && level.material.length);
+    if (!currentCourse || !subject) { setNotice("Selecciona el curso actual y el área antes de generar."); return; }
+    if (!files.unidades.length) { setNotice("Añade las unidades didácticas del curso actual."); return; }
+    if (ready.length !== orientationLevels.length) { setNotice("Selecciona cada nivel de destino y añade su material de referencia."); return; }
+    if (new Set(ready.map((level) => level.targetCourse)).size !== ready.length) { setNotice("Cada nivel de destino debe aparecer una sola vez."); return; }
+    if (ready.some((level) => level.targetCourse === currentCourse)) { setNotice("Los niveles de destino deben ser distintos del curso actual."); return; }
+    const allFiles = [...files.unidades, ...ready.flatMap((level) => level.material)];
+    const oversized = allFiles.find((file) => file.size > 60 * 1024 * 1024);
+    if (oversized) { setNotice(`“${oversized.name}” supera el límite de 60 MB por documento.`); return; }
+    setProcessing(true); setProgress(2); setProgressLabel(`Preparando ${ready.length} niveles de adaptación…`);
+    try {
+      const createdResults: OrientationResult[] = [];
+      for (let levelIndex = 0; levelIndex < ready.length; levelIndex++) {
+        const level = ready[levelIndex];
+        const selected = [...files.unidades.map((file) => ({ category: "unidades" as UploadKey, file })), ...level.material.map((file) => ({ category: "material" as UploadKey, file }))];
+        const totalBytes = selected.reduce((sum, item) => sum + item.file.size, 0);
+        if (totalBytes > 180 * 1024 * 1024) throw new Error(`Los documentos para ${level.targetCourse} superan 180 MB. Divide el material de ese nivel.`);
+        setProgressLabel(`Creando el recurso de ${level.targetCourse} · ${levelIndex + 1} de ${ready.length}`);
+        const create = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "adaptation", studentName: `Banco del Departamento de Orientación · ${level.targetCourse}`, currentCourse, targetCourse: level.targetCourse, subject, academicYear, teacherName }) });
+        const created = await responseBody(create); if (!create.ok) throw new Error(created.error || "No se pudo crear el trabajo.");
+        let uploadedChunks = 0; const chunkSize = 768 * 1024; const totalChunks = selected.reduce((sum, item) => sum + Math.ceil(item.file.size / chunkSize), 0);
+        for (const { category, file } of selected) { const total = Math.ceil(file.size / chunkSize); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", category); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}”.`); uploadedChunks += 1; const levelBase = levelIndex / ready.length; const levelPart = uploadedChunks / Math.max(totalChunks, 1) / ready.length; setProgress(Math.min(88, 3 + Math.round((levelBase + levelPart * .55) * 85))); } }
+        const orientationNotes = `Recurso general del Departamento de Orientación. Adapta todas las UDI de ${currentCourse} al nivel de ${level.targetCourse}, tomando como referencia exclusiva los materiales de ese nivel. No menciones alumnado concreto, diagnósticos ni nivel competencial en las páginas destinadas al alumnado. Conserva el orden y los nombres reales de las unidades. Crea una parte para alumnado, visual, motivadora y lista para imprimir, y al final una parte docente con indicadores de evaluación, rúbricas, listas de control y pruebas.`;
+        const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: orientationNotes, studentContext: {} }) });
+        const generated = await responseBody(response); if (!response.ok) throw new Error(generated.error || `No se pudo generar el nivel ${level.targetCourse}.`);
+        createdResults.push({ jobId: created.job.id, result: generated.result, level: level.targetCourse }); setProgress(10 + Math.round(((levelIndex + 1) / ready.length) * 90));
+      }
+      setOrientationResults(createdResults); setProgress(100); setProgressLabel(`${createdResults.length} recursos por nivel completados y guardados`); setNotice(`Banco de materiales creado para ${createdResults.length} nivel${createdResults.length === 1 ? "" : "es"}.`); await loadHistory();
+    } catch (error) { setProgressLabel("El proceso se ha detenido"); setNotice(error instanceof Error ? error.message : "No se pudieron generar los recursos por niveles."); } finally { setProcessing(false); }
+  };
   const generate = async (kind: "adaptation" | "project") => {
     setNotice(""); setResult(""); setAdaptedProject(null); setProgress(0); setProgressLabel("");
     if (kind === "adaptation" && (!studentName.trim() || !currentCourse || !targetCourse)) { setNotice("Completa el nombre, el curso actual y el nivel de adaptación."); return; }
@@ -299,7 +339,7 @@ export default function Home() {
     {showHistory && history.length > 0 && <button type="button" className="history-delete-all" disabled={deletingHistory} onClick={deleteAllHistory}>{deletingHistory ? "Eliminando todo…" : `Eliminar todo (${history.length})`}</button>}
     <header className="site-header">
       <button className="brand" onClick={() => go("home")} aria-label="Ir al inicio"><span className="brand-mark">A<span>+</span></span><span><strong>Adapta</strong><small>Docencia a medida</small><em>Manu Galán Marín</em></span></button>
-      <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button><button onClick={() => setShowManual(true)}>Manual de uso</button></nav>
+      <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button><button className={view === "orientacion" ? "active" : ""} onClick={() => go("orientacion")}>Departamento de Orientación</button><button onClick={() => setShowManual(true)}>Manual de uso</button></nav>
       <div className="header-tools">{isAdmin && <button className="admin-button" onClick={openAdmin}>⚙ Administrador</button>}{unreadSharedCount > 0 && <button type="button" className="shared-notification" onClick={openSharedNotification} aria-label={`${unreadSharedCount} proyecto${unreadSharedCount === 1 ? "" : "s"} compartido${unreadSharedCount === 1 ? "" : "s"} sin leer`}><span aria-hidden="true">🔔</span><b>{unreadSharedCount}</b><small>Proyecto compartido</small></button>}<button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button></div>
     </header>
     {view === "home" && <div className="home-view">
@@ -313,6 +353,7 @@ export default function Home() {
       <section className="choice-section"><div className="section-heading"><span>¿QUÉ QUIERES CREAR HOY?</span><h2>Elige tu punto de partida</h2><p>Te acompañamos paso a paso. Solo necesitas tus materiales de clase.</p></div><div className="choice-grid">
         <button className="choice-card coral" onClick={() => go("adaptacion")}><span className="choice-number">01</span><div className="choice-icon">Aa</div><div><span className="mini-label">PARA CADA ESTUDIANTE</span><h3>Adaptación curricular</h3><p>Ajusta los contenidos del curso al nivel competencial de la persona, respetando el formato y estilo de tus unidades.</p><span className="card-link">Comenzar adaptación <b>→</b></span></div></button>
         <button className="choice-card blue" onClick={() => go("proyecto")}><span className="choice-number">02</span><div className="choice-icon">✣</div><div><span className="mini-label">PARA TODA LA CLASE</span><h3>Proyecto interdisciplinar</h3><p>Conecta Matemáticas, Lengua, Conocimiento e Inglés en una experiencia global con un producto final compartido.</p><span className="card-link">Diseñar proyecto <b>→</b></span></div></button>
+        <button className="choice-card orientation" onClick={() => go("orientacion")}><span className="choice-number">03</span><div className="choice-icon">1→4</div><div><span className="mini-label">PARA TODO EL CENTRO</span><h3>Departamento de Orientación</h3><p>Convierte las mismas UDI del curso actual en recursos para varios niveles educativos de forma simultánea.</p><span className="card-link">Crear banco multinivel <b>→</b></span></div></button>
       </div></section>
     </div>}
 
@@ -333,6 +374,17 @@ export default function Home() {
       </div></div>
     </section>}
 
+    {view === "orientacion" && <section className="workspace orientation-workspace">
+      <button className="back" onClick={() => go("home")}>← Volver al inicio</button><div className="workspace-title"><span className="section-kicker orientation-ink">DEPARTAMENTO DE ORIENTACIÓN</span><h1>Un mismo curso, todos los niveles que necesites</h1><p>Crea un banco común de recursos adaptados para el centro sin introducir datos personales del alumnado.</p></div>
+      <div className="orientation-intro"><span aria-hidden="true">1→4</span><div><strong>Adaptación multinivel simultánea</strong><p>Las UDI del curso actual son comunes. Cada curso de destino incorpora únicamente sus propios libros, fichas o materiales de referencia.</p></div></div>
+      <div className="form-shell orientation-shell"><aside><span>01</span><strong>Curso de origen</strong><i /><span>02</span><strong>UDI comunes</strong><i /><span>03</span><strong>Niveles</strong></aside><div className="form-content">
+        <div className="form-section"><span className="step-label orientation-ink">01 · INFORMACIÓN DEL BANCO</span><h2>Define el material de partida</h2><div className="field-grid"><div className="field"><label htmlFor="orientation-course">Curso actual de las UDI</label><select id="orientation-course" value={currentCourse} onChange={(event) => setCurrentCourse(event.target.value)}><option value="" disabled>Selecciona un curso</option>{courses.map((course) => <option key={course}>{course}</option>)}</select></div><div className="field"><label htmlFor="orientation-subject">Asignatura o área</label><select id="orientation-subject" value={subject} onChange={(event) => setSubject(event.target.value)}><option value="" disabled>Selecciona un área</option>{subjects.map((item) => <option key={item}>{item}</option>)}</select></div><div className="field"><label htmlFor="orientation-year">Año académico</label><select id="orientation-year" value={academicYear} onChange={(event) => setAcademicYear(event.target.value)}>{academicYears.map((year) => <option key={year}>{year}</option>)}</select></div><div className="field"><label htmlFor="orientation-teacher">Responsable del departamento</label><input id="orientation-teacher" value={teacherName} onChange={(event) => setTeacherName(event.target.value)} placeholder="Nombre y apellidos" /></div></div></div>
+        <div className="form-section orientation-common"><span className="step-label orientation-ink">02 · DOCUMENTACIÓN COMÚN</span><h2>Unidades didácticas del curso actual</h2><p className="section-help">Súbelas una sola vez. Se utilizarán como contenido de partida para todos los niveles seleccionados.</p><UploadBox id="unidades" eyebrow="UDI DEL CURSO DE ORIGEN" title={`Unidades didácticas de ${currentCourse || "curso actual"}`} description="Añade simultáneamente las 9–12 unidades o todos los archivos que formen el curso." files={files.unidades} onFiles={addFiles} /></div>
+        <div className="form-section"><span className="step-label orientation-ink">03 · NIVELES DE DESTINO</span><h2>Añade los cursos que necesite el centro</h2><p className="section-help">Cada tarjeta genera un recurso completo e independiente, utilizando las UDI comunes y el material propio de ese nivel.</p><div className="orientation-levels">{orientationLevels.map((level, index) => <article className="orientation-level" key={level.id}><header><span>{String(index + 1).padStart(2, "0")}</span><div><strong>Nivel de referencia</strong><small>Recurso independiente</small></div>{orientationLevels.length > 1 && <button type="button" onClick={() => removeOrientationLevel(level.id)}>Eliminar</button>}</header><div className="field"><label>Curso al que se adaptarán las UDI</label><select value={level.targetCourse} onChange={(event) => updateOrientationLevel(level.id, { targetCourse: event.target.value })}><option value="" disabled>Selecciona un nivel</option>{courses.filter((course) => course !== currentCourse).map((course) => <option key={course}>{course}</option>)}</select></div><BatchDocumentField label={`Material de ${level.targetCourse || "este nivel"}`} hint="Libros, UDI, fichas o recursos que marcan el formato y la dificultad" files={level.material} onFiles={(material) => updateOrientationLevel(level.id, { material })} /></article>)}</div><button type="button" className="add-orientation-level" onClick={addOrientationLevel}>+ Añadir otro nivel educativo</button></div>
+        {notice && <div className="success-note">{notice}</div>}{orientationResults.length > 0 && <section className="orientation-results"><h2>Banco de recursos creado</h2><p>Descarga el recurso completo de cada nivel o abre su contenido para seleccionar unidades.</p>{orientationResults.map((item) => <article key={item.jobId}><div><strong>{subject || "Área"}</strong><span>{currentCourse} → {item.level}</span></div><ResultPanel result={item.result} jobId={item.jobId} /></article>)}</section>}
+        <div className="form-footer orientation-footer"><p><strong>{orientationLevels.length} nivel{orientationLevels.length === 1 ? "" : "es"} de destino</strong><br />Se creará y guardará un recurso completo por cada curso seleccionado.</p><button className={`primary orientation-primary ${processing ? "progress-primary" : ""}`} disabled={processing} onClick={generateOrientation}>{processing ? <ButtonProgress value={progress} label="Creando el banco por niveles…" detail={progressLabel} estimate="Tiempo orientativo: 15–45 minutos por nivel" /> : <>Generar recursos multinivel <span>✦</span></>}</button></div>
+      </div></div>
+    </section>}
     {view === "proyecto" && <section className="workspace project-workspace">
       <button className="back" onClick={() => go("home")}>← Volver al inicio</button><div className="workspace-title"><span className="section-kicker blue-ink">PROYECTO INTERDISCIPLINAR</span><h1>Una idea, muchas formas de aprender</h1><p>Reúne las unidades de las distintas áreas y crea una experiencia conectada, participativa y con sentido.</p></div>
       <div className="project-layout"><div className="project-main">
