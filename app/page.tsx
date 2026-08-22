@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import UserManual from "./manual";
 
 type View = "home" | "adaptacion" | "proyecto";
 type UploadKey = "dictamen" | "programacion" | "criterios" | "unidades" | "material" | "proyecto" | "project_math" | "project_math_criteria" | "project_language" | "project_language_criteria" | "project_science" | "project_science_criteria" | "project_english" | "project_english_criteria";
@@ -103,6 +104,7 @@ export default function Home() {
   const [historyLevel, setHistoryLevel] = useState("");
   const [historyYear, setHistoryYear] = useState("");
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   const [sharedProjects, setSharedProjects] = useState<SharedProject[]>([]);
   const [sharingProject, setSharingProject] = useState("");
   const [showAdmin, setShowAdmin] = useState(false);
@@ -292,11 +294,12 @@ export default function Home() {
 
   return <main>
     <button type="button" className={`library-launch ${isAdmin ? "admin-visible" : "user-visible"}`} onClick={openLibrary}>◫ Biblioteca compartida</button>
+    {showManual && <UserManual onClose={() => setShowManual(false)} />}
     {showLibrary && <SharedLibrary ownProjects={history.filter((job) => job.kind.startsWith("project") && job.status === "completed")} projects={sharedProjects} busy={sharingProject} onClose={() => setShowLibrary(false)} onToggle={toggleProjectSharing} onCopy={copySharedProject} />}
     {showHistory && history.length > 0 && <button type="button" className="history-delete-all" disabled={deletingHistory} onClick={deleteAllHistory}>{deletingHistory ? "Eliminando todo…" : `Eliminar todo (${history.length})`}</button>}
     <header className="site-header">
       <button className="brand" onClick={() => go("home")} aria-label="Ir al inicio"><span className="brand-mark">A<span>+</span></span><span><strong>Adapta</strong><small>Docencia a medida</small><em>Manu Galán Marín</em></span></button>
-      <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button></nav>
+      <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button><button onClick={() => setShowManual(true)}>Manual de uso</button></nav>
       <div className="header-tools">{isAdmin && <button className="admin-button" onClick={openAdmin}>⚙ Administrador</button>}{unreadSharedCount > 0 && <button type="button" className="shared-notification" onClick={openSharedNotification} aria-label={`${unreadSharedCount} proyecto${unreadSharedCount === 1 ? "" : "s"} compartido${unreadSharedCount === 1 ? "" : "s"} sin leer`}><span aria-hidden="true">🔔</span><b>{unreadSharedCount}</b><small>Proyecto compartido</small></button>}<button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button></div>
     </header>
     {view === "home" && <div className="home-view">
