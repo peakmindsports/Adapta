@@ -40,3 +40,14 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# Archivos temporales de despliegue
+.openai/deployment-stage-v*/
+.openai/site-version*.tar.gz
+
+# Archivos temporales de TypeScript y Word
+tsconfig.tsbuildinfo
+~$*.docx
+
+# Documento privado con la clave
+Clave api.docx
