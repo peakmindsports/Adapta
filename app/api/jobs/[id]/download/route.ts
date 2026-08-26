@@ -4,13 +4,27 @@ import UPNG from "@pdf-lib/upng";
 import jpeg from "jpeg-js";
 import { ensureSchema, jsonError, ownerFrom, runtime, safeFilename } from "../../../_shared";
 
-type Block = { type: "heading" | "bullet" | "checkbox" | "number" | "paragraph" | "tableRow" | "card" | "break" | "image" | "match"; text: string; second?: string; level?: number };
+type Block = { type: "heading" | "bullet" | "checkbox" | "number" | "paragraph" | "tableRow" | "card" | "break" | "image" | "match"; text: string; second?: string; level?: number; cells?: string[] };
 type SourceImage = { bytes: Uint8Array; width: number; height: number; type: "jpg" | "png" };
-type CoverDetails = { subject?: string | null; student?: string | null; course?: string | null; academicYear?: string | null };
+type CoverDetails = { subject?: string | null; student?: string | null; course?: string | null; academicYear?: string | null; audience?: "all" | "student" | "teacher" };
 
 function generatedFallbackCover(): SourceImage {
-  const width = 430; const height = 430; const rgba = new Uint8Array(width * height * 4);
-  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) { const offset = (y * width + x) * 4; const coral = x + y < 190 || x > 360; rgba[offset] = coral ? 239 : 239; rgba[offset + 1] = coral ? 110 : 247; rgba[offset + 2] = coral ? 87 : 242; rgba[offset + 3] = 255; }
+  const width = 900; const height = 560; const rgba = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    const offset = (y * width + x) * 4; let color = [246, 242, 231];
+    const circle = (cx: number, cy: number, radius: number) => (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2;
+    if (circle(130, 105, 92)) color = [239, 110, 87];
+    if (circle(790, 455, 120)) color = [64, 142, 151];
+    if (x > 170 && x < 730 && y > 105 && y < 455) color = [255, 255, 252];
+    if (x > 205 && x < 430 && y > 155 && y < 405) color = [214, 232, 226];
+    if (x > 470 && x < 695 && y > 155 && y < 405) color = [255, 224, 165];
+    if ((x > 225 && x < 410 || x > 490 && x < 675) && y > 185 && y < 198) color = [39, 127, 145];
+    if ((x > 225 && x < 410 || x > 490 && x < 675) && y > 235 && y < 246) color = [116, 128, 130];
+    if ((x > 225 && x < 410 || x > 490 && x < 675) && y > 285 && y < 296) color = [116, 128, 130];
+    if ((x > 225 && x < 410 || x > 490 && x < 675) && y > 335 && y < 346) color = [116, 128, 130];
+    if (circle(250, 240, 15) || circle(515, 290, 15) || circle(250, 340, 15)) color = [239, 110, 87];
+    rgba[offset] = color[0]; rgba[offset + 1] = color[1]; rgba[offset + 2] = color[2]; rgba[offset + 3] = 255;
+  }
   return { bytes: new Uint8Array(UPNG.encode([rgba.buffer], width, height, 0)), width, height, type: "png" };
 }
 
@@ -56,7 +70,7 @@ function parseMarkdown(markdown: string): Block[] {
     else if (bullet) { flush(); blocks.push({ type: "bullet", text: cleanMarkdown(bullet[1]) }); }
     else if (number) { flush(); blocks.push({ type: "number", text: cleanMarkdown(number[1]) }); }
     else if (/^\|(?:\s*:?-+:?\s*\|)+$/.test(line)) { flush(); }
-    else if (/^\|.+\|$/.test(line)) { flush(); blocks.push({ type: "tableRow", text: line.slice(1, -1).split("|").map((cell) => cleanMarkdown(cell)).filter(Boolean).join("  ·  ") }); }
+    else if (/^\|.+\|$/.test(line)) { flush(); const cells = line.slice(1, -1).split("|").map((cell) => cleanMarkdown(cell)); blocks.push({ type: "tableRow", text: cells.join(" · "), cells }); }
     else if (/^---+$/.test(line)) { flush(); blocks.push({ type: "break", text: "" }); }
     else paragraph.push(line);
   }
@@ -82,6 +96,11 @@ function repairIndex(markdown: string) {
 
 function clarifyAmbiguousActivities(markdown: string) {
   return markdown.replace(/Copia una palabra\.?\s*\n+\s*(?:\*\*)?Población\s*:\s*(?:\*\*)?/gi, "Copia la palabra «población» en la línea.\n\n**Población:** ______________________________");
+}
+function repairEvaluationLabels(markdown: string) {
+  return markdown
+    .replace(/Criterio no disponible en la documentación\.?/gi, "Indicador observable de la actividad")
+    .replace(/Criterio no disponible\.?/gi, "Indicador observable de la actividad");
 }
 
 function studentSafeMarkdown(markdown: string) {
@@ -130,8 +149,8 @@ function resourceForScope(markdown: string, requested: number[], scope: Download
 }
 
 async function makeWord(title: string, markdown: string, images: Array<SourceImage | null>, cover: CoverDetails, coverImage: SourceImage) {
-  const coverScale = Math.min(430 / coverImage.width, 430 / coverImage.height, 1);
-  const children: Paragraph[] = [new Paragraph({ children: [new TextRun({ text: "ADAPTA  ·  RECURSO EDUCATIVO", bold: true, color: "277F91", size: 18, characterSpacing: 40 })], spacing: { before: 300, after: 260 } }), new Paragraph({ children: [new TextRun({ text: cover.subject || "Mi recurso anual", bold: true, color: "172B30", size: 48 })], spacing: { after: 120 } }), new Paragraph({ children: [new TextRun({ text: "Aprendo a mi manera", italics: true, color: "EF6E57", size: 28 })], spacing: { after: 280 } }), new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ type: coverImage.type, data: coverImage.bytes, transformation: { width: Math.round(coverImage.width * coverScale), height: Math.round(coverImage.height * coverScale) } })], spacing: { after: 260 } }), new Paragraph({ children: [new TextRun({ text: cover.student || title, bold: true, size: 26, color: "172B30" }), new TextRun({ break: 1, text: [cover.course, cover.academicYear].filter(Boolean).join("  ·  "), size: 20, color: "587075" })], shading: { fill: "EDF7F4" }, border: { left: { color: "277F91", style: "single", size: 18 } }, spacing: { before: 100, after: 200 }, indent: { left: 220 } }), new Paragraph({ children: [new PageBreak()] }), new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 240 } }), new Paragraph({ children: [new TextRun({ text: "Recurso adaptado", color: "277F91", size: 24 })], spacing: { after: 360 } })];
+  const coverScale = Math.min(430 / coverImage.width, 350 / coverImage.height, 1); const teacherCover = cover.audience === "teacher";
+  const children: Paragraph[] = [new Paragraph({ children: [new TextRun({ text: teacherCover ? "ADAPTA  ·  GUÍA DOCENTE" : "ADAPTA  ·  RECURSO EDUCATIVO", bold: true, color: "277F91", size: 18, characterSpacing: 40 })], spacing: { before: 300, after: 260 } }), new Paragraph({ children: [new TextRun({ text: cover.subject || "Mi recurso anual", bold: true, color: "172B30", size: 48 })], spacing: { after: 120 } }), new Paragraph({ children: [new TextRun({ text: teacherCover ? "Evaluar con claridad" : "Aprendo a mi manera", italics: true, color: "EF6E57", size: 28 })], spacing: { after: 280 } }), new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ type: coverImage.type, data: coverImage.bytes, transformation: { width: Math.round(coverImage.width * coverScale), height: Math.round(coverImage.height * coverScale) } })], spacing: { after: 260 } }), new Paragraph({ children: [new TextRun({ text: cover.student || title, bold: true, size: 26, color: "172B30" }), new TextRun({ break: 1, text: [cover.course, cover.academicYear].filter(Boolean).join("  ·  "), size: 20, color: "587075" })], shading: { fill: "EDF7F4" }, border: { left: { color: "277F91", style: "single", size: 18 } }, spacing: { before: 100, after: 200 }, indent: { left: 220 } }), new Paragraph({ children: [new PageBreak()] }), new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 240 } }), new Paragraph({ children: [new TextRun({ text: "Recurso adaptado", color: "277F91", size: 24 })], spacing: { after: 360 } })];
   let firstHeading = true;
   let imageIndex = 0;
   for (const block of parseMarkdown(markdown)) {
@@ -147,7 +166,7 @@ async function makeWord(title: string, markdown: string, images: Array<SourceIma
     } else if (block.type === "checkbox") {
       children.push(new Paragraph({ children: [new TextRun({ text: "☐  ", bold: true, size: 26 }), new TextRun({ text: block.text, size: 22 })], spacing: { before: 45, after: 75 }, indent: { left: 280 } }));
     } else if (block.type === "tableRow") {
-      children.push(new Paragraph({ children: [new TextRun({ text: block.text, size: 20 })], shading: { fill: "F1F8F6" }, border: { bottom: { color: "B8D8CF", style: "single", size: 4 } }, spacing: { before: 60, after: 80 } }));
+      const cells = block.cells?.length ? block.cells : [block.text]; const rubricHeader = cells.some((cell) => /^(Excelente|Bien|En proceso|Necesita apoyo|Todavía no|Observaciones)/i.test(cell)); const cellWidth = Math.floor(100 / cells.length); children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, columnWidths: cells.map(() => Math.floor(9400 / cells.length)), rows: [new TableRow({ cantSplit: true, children: cells.map((cell, cellIndex) => new TableCell({ width: { size: cellWidth, type: WidthType.PERCENTAGE }, shading: { fill: cellIndex === 0 ? "DCE6F7" : "F8FAF9" }, children: [new Paragraph({ children: [new TextRun({ text: cell, bold: cellIndex === 0 || rubricHeader, size: 17 })], spacing: { before: 80, after: 80, line: 240 } })] })) })] }));
     } else if (block.type === "heading") {
       if (!firstHeading && block.level === 1) children.push(new Paragraph({ children: [new PageBreak()] })); firstHeading = false;
       const activityHeading = /actividad|producto final|demuestro|repaso|juego|taller/i.test(block.text);
@@ -168,6 +187,7 @@ function wrapText(text: string, maxWidth: number, size: number, font: { widthOfT
 }
 
 async function makePdf(title: string, markdown: string, images: Array<SourceImage | null>, cover: CoverDetails, coverImage: SourceImage, includeActivityMap = false) {
+  const teacherCover = cover.audience === "teacher";
   const pdf = await PDFDocument.create(); const regular = await pdf.embedFont(StandardFonts.Helvetica); const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const pageSize: [number, number] = [595.28, 841.89]; const margin = 54; let page = pdf.addPage(pageSize); let y = pageSize[1] - margin;
   const addPage = () => { page = pdf.addPage(pageSize); y = pageSize[1] - margin; };
@@ -177,9 +197,9 @@ async function makePdf(title: string, markdown: string, images: Array<SourceImag
     for (const line of lines) { page.drawText(line, { x: margin + indent, y, size, font, color }); y -= lineHeight; } y -= gap;
   };
   page.drawRectangle({ x: 0, y: 0, width: pageSize[0], height: pageSize[1], color: rgb(1, .98, .93) }); page.drawRectangle({ x: 0, y: 0, width: 18, height: pageSize[1], color: rgb(.15, .5, .57) }); page.drawCircle({ x: 550, y: 790, size: 72, color: rgb(.94, .43, .34), opacity: .9 });
-  page.drawText("ADAPTA  ·  RECURSO EDUCATIVO", { x: 48, y: 785, size: 10, font: bold, color: rgb(.15, .5, .57) });
+  page.drawText(teacherCover ? "ADAPTA  ·  GUÍA DOCENTE" : "ADAPTA  ·  RECURSO EDUCATIVO", { x: 48, y: 785, size: 10, font: bold, color: rgb(.15, .5, .57) });
   const coverTitle = pdfSafe(cover.subject || "Mi recurso anual"); wrapText(coverTitle, 470, 30, bold).slice(0, 2).forEach((line, index) => page.drawText(line, { x: 48, y: 742 - index * 36, size: 30, font: bold, color: rgb(.09, .17, .19) }));
-  page.drawText("Aprendo a mi manera", { x: 48, y: 662, size: 17, font: bold, color: rgb(.94, .34, .25) });
+  page.drawText(teacherCover ? "Evaluar con claridad" : "Aprendo a mi manera", { x: 48, y: 662, size: 17, font: bold, color: rgb(.94, .34, .25) });
   const coverEmbedded = coverImage.type === "png" ? await pdf.embedPng(coverImage.bytes) : await pdf.embedJpg(coverImage.bytes); const coverScale = Math.min(470 / coverEmbedded.width, 405 / coverEmbedded.height); const coverWidth = coverEmbedded.width * coverScale; const coverHeight = coverEmbedded.height * coverScale; page.drawRectangle({ x: (pageSize[0] - coverWidth) / 2 - 7, y: 222 - 7, width: coverWidth + 14, height: coverHeight + 14, color: rgb(1, 1, 1), borderColor: rgb(.82, .73, .59), borderWidth: 1 }); page.drawImage(coverEmbedded, { x: (pageSize[0] - coverWidth) / 2, y: 222, width: coverWidth, height: coverHeight });
   page.drawRectangle({ x: 42, y: 65, width: 511, height: 112, color: rgb(.93, .97, .95) }); page.drawRectangle({ x: 42, y: 65, width: 7, height: 112, color: rgb(.15, .5, .57) }); page.drawText(pdfSafe(cover.student || title), { x: 65, y: 128, size: 15, font: bold, color: rgb(.09, .17, .19), maxWidth: 460 }); page.drawText(pdfSafe([cover.course, cover.academicYear].filter(Boolean).join("  ·  ")), { x: 65, y: 96, size: 10, font: regular, color: rgb(.33, .44, .46) });
   addPage(); draw(title, 24, true, rgb(0.94, 0.34, 0.25), 0, 7); draw("Recurso adaptado", 12, true, rgb(0.15, 0.5, 0.57), 0, 22);
@@ -200,7 +220,7 @@ async function makePdf(title: string, markdown: string, images: Array<SourceImag
     } else if (block.type === "checkbox") {
       if (y < margin + 35) addPage(); page.drawRectangle({ x: margin + 8, y: y - 2, width: 11, height: 11, borderColor: rgb(0.15, 0.5, 0.57), borderWidth: 1.5 }); draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 28, 7);
     } else if (block.type === "tableRow") {
-      const lines = wrapText(block.text, pageSize[0] - margin * 2 - 20, 9.5, regular); const boxHeight = Math.max(28, lines.length * 13 + 12); if (y - boxHeight < margin + 28) addPage(); page.drawRectangle({ x: margin, y: y - boxHeight + 5, width: pageSize[0] - margin * 2, height: boxHeight, color: rgb(0.95, 0.98, 0.97), borderColor: rgb(0.72, 0.84, 0.81), borderWidth: .7 }); draw(block.text, 9.5, false, rgb(0.18, 0.25, 0.26), 10, 8);
+      const cells = block.cells?.length ? block.cells : [block.text]; const rubricHeader = cells.some((cell) => /^(Excelente|Bien|En proceso|Necesita apoyo|Todavía no|Observaciones)/i.test(cell)); const tableWidth = pageSize[0] - margin * 2; const columnWidth = tableWidth / cells.length; const cellLines = cells.map((cell) => wrapText(cell, columnWidth - 12, cells.length >= 5 ? 7.1 : 8.2, regular)); const lineHeight = cells.length >= 5 ? 9.4 : 11; const rowHeight = Math.max(30, Math.max(...cellLines.map((lines) => lines.length)) * lineHeight + 14); if (y - rowHeight < margin + 28) addPage(); const rowTop = y; cells.forEach((cell, cellIndex) => { const cellX = margin + cellIndex * columnWidth; const fill = cellIndex === 0 ? rgb(.86, .9, .97) : cellIndex === 1 && cells.length >= 5 ? rgb(.82, .93, .75) : cellIndex === 2 && cells.length >= 5 ? rgb(1, .91, .66) : cellIndex === 3 && cells.length >= 5 ? rgb(.98, .78, .57) : cellIndex === 4 && cells.length >= 5 ? rgb(.96, .49, .58) : rgb(.98, .99, .98); page.drawRectangle({ x: cellX, y: rowTop - rowHeight, width: columnWidth, height: rowHeight, color: fill, borderColor: rgb(.76, .79, .78), borderWidth: .65 }); cellLines[cellIndex].forEach((line, lineIndex) => page.drawText(line, { x: cellX + 6, y: rowTop - 12 - lineIndex * lineHeight, size: cells.length >= 5 ? 7.1 : 8.2, font: cellIndex === 0 || rubricHeader ? bold : regular, color: rgb(.12, .17, .18) })); }); y -= rowHeight;
     } else if (block.type === "heading") { if (!firstHeading && block.level === 1 && y < pageSize[1] - margin - 80) addPage(); firstHeading = false; const activityHeading = /actividad|producto final|demuestro|repaso|juego|taller/i.test(block.text); if (activityHeading && y < pageSize[1] - margin - 30) y -= 26; else y -= block.level === 1 ? 10 : 4; if (activityHeading) { if (y < margin + 90) addPage(); page.drawRectangle({ x: margin - 8, y: y - 8, width: pageSize[0] - margin * 2 + 16, height: 30, color: rgb(0.99, 0.9, 0.84), borderColor: rgb(0.9, 0.62, 0.52), borderWidth: .8 }); } const activityCode = block.text.match(/\[(ACT-[A-Z0-9-]+)\]/i)?.[1]?.toUpperCase(); if (activityCode && !activityLocations.some((item) => item.code === activityCode)) activityLocations.push({ code: activityCode, title: block.text.replace(/\[ACT-[A-Z0-9-]+\]\s*/i, "").trim(), page: pdf.getPageCount() }); draw(block.text, block.level === 1 ? 18 : block.level === 2 ? 15 : 12, true, block.level === 1 ? rgb(0.15, 0.5, 0.57) : rgb(0.09, 0.17, 0.19), 0, activityHeading ? 12 : 8); }
     else if (block.type === "bullet") draw(`- ${block.text}`, 10.5, false, rgb(0.18, 0.25, 0.26), 12, 4);
     else if (block.type === "number") { y -= 7; draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 12, 13); }
@@ -265,7 +285,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request);
   const job = await runtime().DB.prepare("SELECT title, result, kind, student_name AS student, current_course AS course, subject, academic_year AS academicYear FROM jobs WHERE id = ? AND owner_email = ? AND status = 'completed'").bind(id, owner).first<{ title: string; result: string; kind: string; student?: string; course?: string; subject?: string; academicYear?: string }>();
   if (!job?.result) return jsonError("El documento aún no está disponible.", 404);
-  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const scopeValue = url.searchParams.get("scope"); const scope: DownloadScope = scopeValue === "student" || scopeValue === "teacher" ? scopeValue : "all"; const repaired = clarifyAmbiguousActivities(repairIndex(job.result)); const scoped = resourceForScope(repaired, requested, scope); const result = studentSafeMarkdown(scoped); const unitSuffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const scopeSuffix = scope === "student" ? "-Alumnado" : scope === "teacher" ? "-Docente" : "-Completo"; const filename = `${safeFilename(job.title)}${unitSuffix}${scopeSuffix}`; const safeMode = url.searchParams.get("safe") === "1"; let images: Array<SourceImage | null> = []; if (!safeMode) { try { images = await sourceImages(id, owner, requested, requiredImages(result)); } catch { images = []; } } const fallbackCover = generatedFallbackCover; let coverImage = images.find((image): image is SourceImage => Boolean(image)) || fallbackCover(); const cover = { subject: job.subject, student: job.student, course: job.course, academicYear: job.academicYear };
+  const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const scopeValue = url.searchParams.get("scope"); const scope: DownloadScope = scopeValue === "student" || scopeValue === "teacher" ? scopeValue : "all"; const repaired = repairEvaluationLabels(clarifyAmbiguousActivities(repairIndex(job.result))); const scoped = resourceForScope(repaired, requested, scope); const result = studentSafeMarkdown(scoped); const unitSuffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const scopeSuffix = scope === "student" ? "-Alumnado" : scope === "teacher" ? "-Docente" : "-Completo"; const filename = `${safeFilename(job.title)}${unitSuffix}${scopeSuffix}`; const safeMode = url.searchParams.get("safe") === "1"; let images: Array<SourceImage | null> = []; if (!safeMode) { try { images = await sourceImages(id, owner, requested, requiredImages(result)); } catch { images = []; } } const fallbackCover = generatedFallbackCover; let coverImage = images.find((image): image is SourceImage => Boolean(image)) || fallbackCover(); const cover: CoverDetails = { subject: job.subject, student: job.student, course: job.course, academicYear: job.academicYear, audience: scope };
   if (format === "docx") { let blob: Blob; try { blob = await makeWord(job.title, result, images, cover, coverImage); } catch { coverImage = fallbackCover(); blob = await makeWord(job.title, result, images.map(() => null), cover, coverImage); } return new Response(blob, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${filename}.docx"`, "Cache-Control": "private, no-store" } }); }
   let bytes: Uint8Array; try { bytes = await makePdf(job.title, result, images, cover, coverImage, scope !== "student"); } catch { coverImage = fallbackCover(); bytes = await makePdf(job.title, result, images.map(() => null), cover, coverImage, scope !== "student"); } const body = bytes.slice().buffer as ArrayBuffer;  return new Response(body, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}.pdf"`, "Cache-Control": "private, no-store" } });
 }
