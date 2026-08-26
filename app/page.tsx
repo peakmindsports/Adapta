@@ -407,38 +407,52 @@ export default function Home() {
   const addOrientationLevel = () => setOrientationLevels((levels) => [...levels, newOrientationLevel()]);
   const removeOrientationLevel = (id: string) => setOrientationLevels((levels) => levels.length > 1 ? levels.filter((level) => level.id !== id) : levels);
   const generateOrientation = async () => {
-    setNotice(""); setOrientationResults([]); setProgress(0); setProgressLabel("");
+    setNotice(""); setProgress(0); setProgressLabel("");
     const ready = orientationLevels.filter((level) => level.targetCourse && level.material.length);
     if (!currentCourse || !subject) { setNotice("Selecciona el curso actual y el área antes de generar."); return; }
     if (!files.unidades.length) { setNotice("Añade las unidades didácticas del curso actual."); return; }
     if (ready.length !== orientationLevels.length) { setNotice("Selecciona cada nivel de destino y añade su material de referencia."); return; }
     if (new Set(ready.map((level) => level.targetCourse)).size !== ready.length) { setNotice("Cada nivel de destino debe aparecer una sola vez."); return; }
     if (ready.some((level) => level.targetCourse === currentCourse)) { setNotice("Los niveles de destino deben ser distintos del curso actual."); return; }
+    const completedLevels = new Set(orientationResults.map((item) => item.level));
+    const pendingLevels = ready.filter((level) => !completedLevels.has(level.targetCourse));
+    if (!pendingLevels.length) { setProgress(100); setProgressLabel("Todos los niveles seleccionados ya están completados"); setNotice("El banco multinivel ya está completo."); return; }
     const allFiles = [...files.unidades, ...ready.flatMap((level) => level.material)];
     const oversized = allFiles.find((file) => file.size > 60 * 1024 * 1024);
     if (oversized) { setNotice(`“${oversized.name}” supera el límite de 60 MB por documento.`); return; }
-    setProcessing(true); setProgress(2); setProgressLabel(`Preparando ${ready.length} niveles de adaptación…`);
+    setProcessing(true); setProgress(2); setProgressLabel(`Preparando ${pendingLevels.length} niveles de adaptación…`);
     try {
-      const createdResults: OrientationResult[] = [];
-      for (let levelIndex = 0; levelIndex < ready.length; levelIndex++) {
-        const level = ready[levelIndex];
+      const createdResults: OrientationResult[] = orientationResults.filter((item) => ready.some((level) => level.targetCourse === item.level));
+      for (let levelIndex = 0; levelIndex < pendingLevels.length; levelIndex++) {
+        const level = pendingLevels[levelIndex];
         const selected = [...files.unidades.map((file) => ({ category: "unidades" as UploadKey, file })), ...level.material.map((file) => ({ category: "material" as UploadKey, file }))];
         const totalBytes = selected.reduce((sum, item) => sum + item.file.size, 0);
         if (totalBytes > 180 * 1024 * 1024) throw new Error(`Los documentos para ${level.targetCourse} superan 180 MB. Divide el material de ese nivel.`);
-        setProgressLabel(`Creando el recurso de ${level.targetCourse} · ${levelIndex + 1} de ${ready.length}`);
+        setProgressLabel(`Creando el recurso de ${level.targetCourse} · ${levelIndex + 1} de ${pendingLevels.length}`);
         const create = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "adaptation", studentName: `Banco del Departamento de Orientación · ${level.targetCourse}`, currentCourse, targetCourse: level.targetCourse, subject, academicYear, teacherName }) });
         const created = await responseBody(create); if (!create.ok) throw new Error(created.error || "No se pudo crear el trabajo.");
         let uploadedChunks = 0; const chunkSize = 768 * 1024; const totalChunks = selected.reduce((sum, item) => sum + Math.ceil(item.file.size / chunkSize), 0);
-        for (const { category, file } of selected) { const total = Math.ceil(file.size / chunkSize); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", category); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}”.`); uploadedChunks += 1; const levelBase = levelIndex / ready.length; const levelPart = uploadedChunks / Math.max(totalChunks, 1) / ready.length; setProgress(Math.min(88, 3 + Math.round((levelBase + levelPart * .55) * 85))); } }
+        for (const { category, file } of selected) { const total = Math.ceil(file.size / chunkSize); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", category); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}”.`); uploadedChunks += 1; const levelBase = levelIndex / pendingLevels.length; const levelPart = uploadedChunks / Math.max(totalChunks, 1) / pendingLevels.length; setProgress(Math.min(88, 3 + Math.round((levelBase + levelPart * .55) * 85))); } }
         const orientationNotes = `Recurso general del Departamento de Orientación. Adapta todas las UDI de ${currentCourse} al nivel de ${level.targetCourse}, tomando como referencia exclusiva los materiales de ese nivel. No menciones alumnado concreto, diagnósticos ni nivel competencial en las páginas destinadas al alumnado. Conserva el orden y los nombres reales de las unidades. Crea una parte para alumnado, visual, motivadora y lista para imprimir, y al final una parte docente con indicadores de evaluación, rúbricas, listas de control y pruebas.`;
-        let response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: orientationNotes, studentContext: {} }) });
-        if ([502, 503, 504].includes(response.status)) {
-          setProgressLabel(`El servidor interrumpió temporalmente ${level.targetCourse}. Reintentando una vez…`);
-          await new Promise((resolve) => window.setTimeout(resolve, 5000));
-          response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: orientationNotes, studentContext: {} }) });
+let generated: any = null;
+        let generationError = "";
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: orientationNotes, studentContext: {} }) });
+          const responseData = await responseBody(response);
+          if (response.ok) { generated = responseData; break; }
+          generationError = responseData.error || `No se pudo generar el nivel ${level.targetCourse}.`;
+          const savedResponse = await fetch(`/api/jobs/${created.job.id}`);
+          const saved = await responseBody(savedResponse);
+          if (savedResponse.ok && saved.job?.status === "completed" && saved.job?.result) { generated = { result: saved.job.result }; break; }
+          if (![408, 409, 429, 502, 503, 504].includes(response.status) || attempt === 3) break;
+          const waitSeconds = [15, 30, 60][attempt];
+          setProgressLabel(`${level.targetCourse} necesita más tiempo. Reintentando en ${waitSeconds} segundos · intento ${attempt + 2} de 4`);
+          await new Promise((resolve) => window.setTimeout(resolve, waitSeconds * 1000));
         }
-        const generated = await responseBody(response); if (!response.ok) throw new Error(generated.error || `No se pudo generar el nivel ${level.targetCourse}.`);
-        createdResults.push({ jobId: created.job.id, result: generated.result, level: level.targetCourse }); setProgress(10 + Math.round(((levelIndex + 1) / ready.length) * 90));
+        if (!generated?.result) throw new Error(generationError || `No se pudo generar el nivel ${level.targetCourse}. Los niveles ya terminados se conservan: pulsa de nuevo para reanudar.`);
+        createdResults.push({ jobId: created.job.id, result: generated.result, level: level.targetCourse });
+        setOrientationResults([...createdResults]);
+        setProgress(10 + Math.round(((levelIndex + 1) / pendingLevels.length) * 90));
       }
       setOrientationResults(createdResults); setProgress(100); setProgressLabel(`${createdResults.length} recursos por nivel completados y guardados`); setNotice(`Banco de materiales creado para ${createdResults.length} nivel${createdResults.length === 1 ? "" : "es"}.`); await loadHistory();
     } catch (error) { setProgressLabel("El proceso se ha detenido"); setNotice(error instanceof Error ? error.message : "No se pudieron generar los recursos por niveles."); } finally { setProcessing(false); }
@@ -537,7 +551,7 @@ export default function Home() {
         <div className="form-section orientation-common"><span className="step-label orientation-ink">02 · DOCUMENTACIÓN COMÚN</span><h2>Unidades didácticas del curso actual</h2><p className="section-help">Súbelas una sola vez. Se utilizarán como contenido de partida para todos los niveles seleccionados.</p><UploadBox id="unidades" eyebrow="UDI DEL CURSO DE ORIGEN" title={`Unidades didácticas de ${currentCourse || "curso actual"}`} description="Añade simultáneamente las 9–12 unidades o todos los archivos que formen el curso." files={files.unidades} onFiles={addFiles} /></div>
         <div className="form-section"><span className="step-label orientation-ink">03 · NIVELES DE DESTINO</span><h2>Añade los cursos que necesite el centro</h2><p className="section-help">Cada tarjeta genera un recurso completo e independiente, utilizando las UDI comunes y el material propio de ese nivel.</p><div className="orientation-levels">{orientationLevels.map((level, index) => <article className="orientation-level" key={level.id}><header><span>{String(index + 1).padStart(2, "0")}</span><div><strong>Nivel de referencia</strong><small>Recurso independiente</small></div>{orientationLevels.length > 1 && <button type="button" onClick={() => removeOrientationLevel(level.id)}>Eliminar</button>}</header><div className="field"><label>Curso al que se adaptarán las UDI</label><select value={level.targetCourse} onChange={(event) => updateOrientationLevel(level.id, { targetCourse: event.target.value })}><option value="" disabled>Selecciona un nivel</option>{courses.filter((course) => course !== currentCourse).map((course) => <option key={course}>{course}</option>)}</select></div><BatchDocumentField label={`Material de ${level.targetCourse || "este nivel"}`} hint="Libros, UDI, fichas o recursos que marcan el formato y la dificultad" files={level.material} onFiles={(material) => updateOrientationLevel(level.id, { material })} /></article>)}</div><button type="button" className="add-orientation-level" onClick={addOrientationLevel}>+ Añadir otro nivel educativo</button></div>
         {notice && <div className="success-note">{notice}</div>}{orientationResults.length > 0 && <section className="orientation-results"><h2>Banco de recursos creado</h2><p>Descarga el recurso completo de cada nivel o abre su contenido para seleccionar unidades.</p>{orientationResults.map((item) => <article key={item.jobId}><div><strong>{subject || "Área"}</strong><span>{currentCourse} → {item.level}</span></div><ResultPanel result={item.result} jobId={item.jobId} /></article>)}</section>}
-        <div className="form-footer orientation-footer"><p><strong>{orientationLevels.length} nivel{orientationLevels.length === 1 ? "" : "es"} de destino</strong><br />Se creará y guardará un recurso completo por cada curso seleccionado.</p><button className={`primary orientation-primary ${processing ? "progress-primary" : ""}`} disabled={processing} onClick={generateOrientation}>{processing ? <ButtonProgress value={progress} label="Creando el banco por niveles…" detail={progressLabel} estimate="Tiempo orientativo: 15–45 minutos por nivel" /> : <>Generar recursos multinivel <span>✦</span></>}</button></div>
+        <div className="form-footer orientation-footer"><p><strong>{orientationLevels.length} nivel{orientationLevels.length === 1 ? "" : "es"} de destino</strong><br />Se creará y guardará un recurso completo por cada curso seleccionado.</p><button className={`primary orientation-primary ${processing ? "progress-primary" : ""}`} disabled={processing} onClick={generateOrientation}>{processing ? <ButtonProgress value={progress} label="Creando el banco por niveles…" detail={progressLabel} estimate={orientationLevels.length > 3 ? `Tiempo orientativo total: ${Math.ceil(orientationLevels.length * 15 / 60)}–${Math.ceil(orientationLevels.length * 45 / 60)} horas. Puedes seguir navegando por la web.` : "Tiempo orientativo: 15–45 minutos por nivel"} /> : <>Generar recursos multinivel <span>✦</span></>}</button></div>
       </div></div>
     </section>}
     {view === "proyecto" && <section className="workspace project-workspace">

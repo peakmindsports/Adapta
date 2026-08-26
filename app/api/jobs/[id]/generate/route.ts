@@ -67,7 +67,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!job) return jsonError("Trabajo no encontrado.", 404);
   const fileRows = await DB.prepare("SELECT filename, content_type, storage_key, category FROM job_files WHERE job_id = ? AND owner_email = ? ORDER BY created_at").bind(id, owner).all<Record<string, string>>();
   if (!fileRows.results.length) return jsonError("Añade al menos un documento antes de generar.");
-  const quota = await consumeDailyQuota(owner, "generation", 3); if (!quota.allowed) return jsonError("Has alcanzado el límite diario de 3 generaciones durante la fase pública inicial. Podrás volver a generar mañana.", 429);
+  const isOrientationBank = String(job.student_name || "").startsWith("Banco del Departamento de Orientación");
+  const quotaLimit = isOrientationBank ? 12 : 3;
+  const quota = await consumeDailyQuota(owner, "generation", quotaLimit); if (!quota.allowed) return jsonError(isOrientationBank ? "Has alcanzado el límite diario de 12 recursos multinivel. Podrás continuar mañana." : "Has alcanzado el límite diario de 3 generaciones durante la fase pública inicial. Podrás volver a generar mañana.", 429);
   await DB.prepare("UPDATE jobs SET status = 'generating', error = NULL, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
   const openAIFileIds: string[] = [];
   const preparedFiles: Array<{ id: string; filename: string; category: string }> = [];
