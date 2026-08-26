@@ -1,4 +1,4 @@
-import { consumeDailyQuota, authenticationError, ensureSchema, GLOBAL_MODEL_OWNER, jsonError, ownerFrom, runtime, SITE_ADMIN_EMAIL } from "../../../_shared";
+import { recordApiUsage, consumeDailyQuota, authenticationError, ensureSchema, GLOBAL_MODEL_OWNER, jsonError, activeOwnerFrom, runtime, SITE_ADMIN_EMAIL } from "../../../_shared";
 
 function outputText(data: any) {
   if (typeof data.output_text === "string") return data.output_text;
@@ -6,7 +6,7 @@ function outputText(data: any) {
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request); if (!owner) return authenticationError(); const { DB, FILES, OPENAI_API_KEY, OPENAI_MODEL } = runtime();
+  await ensureSchema(); const { id } = await context.params; const owner = await activeOwnerFrom(request); if (!owner) return authenticationError(); const { DB, FILES, OPENAI_API_KEY, OPENAI_MODEL } = runtime();
   if (!OPENAI_API_KEY) return jsonError("La clave de OpenAI no está configurada.", 503);
   const job = await DB.prepare("SELECT student_name, current_course FROM jobs WHERE id = ? AND owner_email = ?").bind(id, owner).first<{ student_name: string; current_course: string }>();
   if (!job) return jsonError("Trabajo no encontrado.", 404);
@@ -26,8 +26,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email IN (?, ?) ORDER BY CASE WHEN owner_email = ? THEN 0 ELSE 1 END LIMIT 1").bind(GLOBAL_MODEL_OWNER, SITE_ADMIN_EMAIL, GLOBAL_MODEL_OWNER).first<{ model: string }>();
     const prompt = `Actúa como orientador educativo. Analiza los informes de ${job.student_name}, actualmente matriculado/a en ${job.current_course}, y propone el curso de Primaria o ESO que mejor representa su nivel competencial global para adaptar materiales. Basa la recomendación únicamente en evidencias funcionales de los documentos (lectura, escritura, matemáticas, comprensión, autonomía y apoyos). No realices diagnósticos. Si hay perfiles muy desiguales, elige un nivel global prudente y explica las diferencias por áreas. Devuelve SOLO JSON válido con esta forma exacta: {"recommendedCourse":"2º de Primaria","explanation":"explicación breve basada en evidencias","confidence":"alta|media|baja","caveat":"limitación o cautela"}. Los cursos válidos son 1º-6º de Primaria y 1º-4º de ESO.`;
-    const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: setting?.model || OPENAI_MODEL || "gpt-5-mini", input: [{ role: "user", content: [{ type: "input_text", text: prompt }, ...uploadedIds.map((fileId) => ({ type: "input_file", file_id: fileId }))] }], max_output_tokens: 1200 }) });
+    const model = setting?.model || OPENAI_MODEL || "gpt-5-mini";
+    const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: [{ role: "user", content: [{ type: "input_text", text: prompt }, ...uploadedIds.map((fileId) => ({ type: "input_file", file_id: fileId }))] }], max_output_tokens: 1200 }) });
     const data = await response.json() as any; if (!response.ok) throw new Error(data?.error?.message || "No se pudo estimar el nivel.");
+    await recordApiUsage(owner, "recommendation", model, data);
     const raw = outputText(data); const match = raw.match(/\{[\s\S]*\}/); if (!match) throw new Error("La IA no devolvió una recomendación estructurada.");
     const recommendation = JSON.parse(match[0]);
     return Response.json({ recommendation });

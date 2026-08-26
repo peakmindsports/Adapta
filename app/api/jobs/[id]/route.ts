@@ -1,12 +1,12 @@
-import { authenticationError, ensureSchema, jsonError, ownerFrom, runtime } from "../../_shared";
+import { authenticationError, ensureSchema, jsonError, activeOwnerFrom, runtime } from "../../_shared";
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
-  await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request); if (!owner) return authenticationError();
+  await ensureSchema(); const { id } = await context.params; const owner = await activeOwnerFrom(request); if (!owner) return authenticationError();
   const job = await runtime().DB.prepare("SELECT id, kind, title, student_name AS studentName, current_course AS currentCourse, target_course AS targetCourse, subject, academic_year AS academicYear, teacher_name AS teacherName, status, result, error, created_at AS createdAt, updated_at AS updatedAt FROM jobs WHERE id = ? AND owner_email = ?").bind(id, owner).first();
   if (!job) return jsonError("Trabajo no encontrado.", 404); return Response.json({ job });
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
-  await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request); if (!owner) return authenticationError(); const { DB, FILES } = runtime();
+  await ensureSchema(); const { id } = await context.params; const owner = await activeOwnerFrom(request); if (!owner) return authenticationError(); const { DB, FILES } = runtime();
   const job = await DB.prepare("SELECT status FROM jobs WHERE id = ? AND owner_email = ?").bind(id, owner).first<{ status: string }>();
   if (!job) return jsonError("Trabajo no encontrado.", 404);
   const rows = await DB.prepare("SELECT DISTINCT storage_key FROM job_files WHERE job_id = ? AND owner_email = ?").bind(id, owner).all<{ storage_key: string }>();

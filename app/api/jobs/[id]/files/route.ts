@@ -1,9 +1,9 @@
-import { authenticationError, ensureSchema, jsonError, ownerFrom, runtime, safeFilename } from "../../../_shared";
+import { authenticationError, ensureSchema, jsonError, activeOwnerFrom, runtime, safeFilename } from "../../../_shared";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   await ensureSchema();
   const { id: jobId } = await context.params;
-  const owner = ownerFrom(request); if (!owner) return authenticationError();
+  const owner = await activeOwnerFrom(request); if (!owner) return authenticationError();
   const job = await runtime().DB.prepare("SELECT id FROM jobs WHERE id = ? AND owner_email = ?").bind(jobId, owner).first();
   if (!job) return jsonError("Trabajo no encontrado.", 404);
   const form = await request.formData();
