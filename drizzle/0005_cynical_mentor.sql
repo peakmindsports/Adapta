@@ -1,4 +1,4 @@
-CREATE TABLE `shared_resource_recipients` (
+CREATE TABLE IF NOT EXISTS `shared_resource_recipients` (
 	`job_id` text NOT NULL,
 	`owner_email` text NOT NULL,
 	`recipient_email` text NOT NULL,
