@@ -1,4 +1,4 @@
-import { ensureSchema, GLOBAL_MODEL_OWNER, jsonError, ownerFrom, runtime, SITE_ADMIN_EMAIL } from "../../../_shared";
+import { consumeDailyQuota, authenticationError, ensureSchema, GLOBAL_MODEL_OWNER, jsonError, ownerFrom, runtime, SITE_ADMIN_EMAIL } from "../../../_shared";
 
 function extractText(data: any): string {
   if (typeof data.output_text === "string") return data.output_text;
@@ -6,7 +6,7 @@ function extractText(data: any): string {
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request);
+  await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request); if (!owner) return authenticationError();
   const body = await request.json() as { targetCourse?: string };
   const courses = ["1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO", "3º de ESO", "4º de ESO"];
   if (!body.targetCourse || !courses.includes(body.targetCourse)) return jsonError("Selecciona un nivel educativo válido.");
@@ -14,6 +14,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!OPENAI_API_KEY) return jsonError("El administrador debe configurar OPENAI_API_KEY.", 503);
   const source = await DB.prepare("SELECT title, current_course, academic_year, teacher_name, result FROM jobs WHERE id = ? AND owner_email = ? AND kind = 'project' AND status = 'completed'").bind(id, owner).first<{ title: string; current_course: string; academic_year?: string; teacher_name?: string; result: string }>();
   if (!source?.result) return jsonError("Primero debes generar el proyecto interdisciplinar.", 404);
+  const quota = await consumeDailyQuota(owner, "generation", 3); if (!quota.allowed) return jsonError("Has alcanzado el límite diario de 3 generaciones durante la fase pública inicial. Podrás volver a generar mañana.", 429);
   const setting = await DB.prepare("SELECT model FROM user_settings WHERE owner_email IN (?, ?) ORDER BY CASE WHEN owner_email = ? THEN 0 ELSE 1 END LIMIT 1").bind(GLOBAL_MODEL_OWNER, SITE_ADMIN_EMAIL, GLOBAL_MODEL_OWNER).first<{ model: string }>();
   const prompt = `Adapta el PROYECTO INTERDISCIPLINAR incluido al nivel educativo ${body.targetCourse}. El proyecto original corresponde a ${source.current_course}. Conserva exactamente su reto, narrativa, producto final, fases, conexión entre áreas y participación familiar: no lo conviertas en un recurso por unidades ni reutilices contenido de una adaptación curricular individual. Ajusta únicamente el acceso y la participación: lenguaje, andamiaje, autonomía, tiempos, agrupamientos, materiales, roles, evidencias y evaluación. Mantén altas expectativas y una contribución auténtica al mismo producto colectivo.\n\nIncluye: 1) versión accesible del reto; 2) barreras previsibles; 3) apoyos por fase y área; 4) adaptación de cada sesión; 5) roles posibles; 6) materiales visuales/manipulativos; 7) producto final compartido y forma concreta de contribuir; 8) evaluación adaptada con indicadores observables vinculados a cada criterio; 9) rúbrica analítica completa de cuatro niveles; 10) lista de control con casillas y observaciones; 11) prueba escrita breve con puntuación y solucionario; 12) participación familiar accesible. Conserva todos los códigos, criterios y saberes del proyecto original: no inventes ninguno. Mantén el apartado docente «Mapa de relaciones entre asignaturas» y explica cómo cada conexión interdisciplinar se conserva con los apoyos nuevos. Conserva también los códigos [ACT-AREA-00] de todas las actividades evaluables y haz que cada rúbrica, prueba, lista y registro cite el código y el título exacto de la actividad, producto o prueba que evalúa. Entrega todos los instrumentos completos y utilizables.\n\nPROYECTO ORIGINAL:\n${source.result}`;
   let data: any = null;

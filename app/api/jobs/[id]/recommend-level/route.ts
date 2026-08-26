@@ -1,4 +1,4 @@
-import { ensureSchema, GLOBAL_MODEL_OWNER, jsonError, ownerFrom, runtime, SITE_ADMIN_EMAIL } from "../../../_shared";
+import { consumeDailyQuota, authenticationError, ensureSchema, GLOBAL_MODEL_OWNER, jsonError, ownerFrom, runtime, SITE_ADMIN_EMAIL } from "../../../_shared";
 
 function outputText(data: any) {
   if (typeof data.output_text === "string") return data.output_text;
@@ -6,12 +6,13 @@ function outputText(data: any) {
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request); const { DB, FILES, OPENAI_API_KEY, OPENAI_MODEL } = runtime();
+  await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request); if (!owner) return authenticationError(); const { DB, FILES, OPENAI_API_KEY, OPENAI_MODEL } = runtime();
   if (!OPENAI_API_KEY) return jsonError("La clave de OpenAI no está configurada.", 503);
   const job = await DB.prepare("SELECT student_name, current_course FROM jobs WHERE id = ? AND owner_email = ?").bind(id, owner).first<{ student_name: string; current_course: string }>();
   if (!job) return jsonError("Trabajo no encontrado.", 404);
   const rows = await DB.prepare("SELECT filename, content_type, storage_key FROM job_files WHERE job_id = ? AND owner_email = ? AND category = 'dictamen' ORDER BY created_at").bind(id, owner).all<Record<string, string>>();
   if (!rows.results.length) return jsonError("Añade al menos un informe o dictamen.");
+  const quota = await consumeDailyQuota(owner, "recommendation", 10); if (!quota.allowed) return jsonError("Has alcanzado el límite diario de 10 análisis de nivel. Podrás volver a solicitar una propuesta mañana.", 429);
   const uploadedIds: string[] = [];
   try {
     for (const row of rows.results.slice(0, 8)) {

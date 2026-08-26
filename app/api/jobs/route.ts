@@ -1,15 +1,15 @@
-import { ensureSchema, jsonError, ownerFrom, runtime } from "../_shared";
+import { authenticationError, ensureSchema, jsonError, ownerFrom, runtime } from "../_shared";
 
 export async function GET(request: Request) {
   await ensureSchema();
-  const owner = ownerFrom(request);
+  const owner = ownerFrom(request); if (!owner) return authenticationError();
   const rows = await runtime().DB.prepare("SELECT id, kind, title, student_name AS studentName, current_course AS currentCourse, target_course AS targetCourse, subject, academic_year AS academicYear, teacher_name AS teacherName, status, shared_at AS sharedAt, created_at AS createdAt, updated_at AS updatedAt FROM jobs WHERE owner_email = ? ORDER BY created_at DESC").bind(owner).all();
   return Response.json({ jobs: rows.results });
 }
 
 export async function POST(request: Request) {
   await ensureSchema();
-  const owner = ownerFrom(request);
+  const owner = ownerFrom(request); if (!owner) return authenticationError();
   const body = await request.json() as Record<string, string>;
   if (!body.kind || !["adaptation", "project", "project_adaptation"].includes(body.kind)) return jsonError("Tipo de trabajo no válido.");
   const id = crypto.randomUUID();
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   await ensureSchema();
-  const owner = ownerFrom(request); const { DB, FILES } = runtime();
+  const owner = ownerFrom(request); if (!owner) return authenticationError(); const { DB, FILES } = runtime();
   const files = await DB.prepare("SELECT DISTINCT storage_key FROM job_files WHERE owner_email = ?").bind(owner).all<{ storage_key: string }>();
   try {
     await DB.batch([DB.prepare("DELETE FROM job_files WHERE owner_email = ?").bind(owner), DB.prepare("DELETE FROM jobs WHERE owner_email = ?").bind(owner)]);

@@ -10,15 +10,28 @@ export type RuntimeEnv = {
 export function runtime() { return env as unknown as RuntimeEnv; }
 
 export function ownerFrom(request: Request) {
-  return request.headers.get("oai-authenticated-user-email") ?? "private-owner";
+  const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
+  return email || null;
 }
 
 export const SITE_ADMIN_EMAIL = "manugalan102@gmail.com";
 export const GLOBAL_MODEL_OWNER = "global-model-setting";
-export function isSiteAdmin(request: Request) { return ownerFrom(request).toLowerCase() === SITE_ADMIN_EMAIL; }
+export function isSiteAdmin(request: Request) { return ownerFrom(request) === SITE_ADMIN_EMAIL; }
 
 export function jsonError(message: string, status = 400) {
   return Response.json({ error: message }, { status });
+}
+export function authenticationError() {
+  return jsonError("Inicia sesión con ChatGPT para utilizar esta herramienta.", 401);
+}
+
+export async function consumeDailyQuota(owner: string, bucket: "generation" | "recommendation", limit: number) {
+  if (owner === SITE_ADMIN_EMAIL) return { allowed: true, remaining: null };
+  const day = new Date().toISOString().slice(0, 10);
+  const result = await runtime().DB.prepare("INSERT INTO daily_usage (owner_email, usage_date, bucket, used, updated_at) VALUES (?, ?, ?, 1, ?) ON CONFLICT(owner_email, usage_date, bucket) DO UPDATE SET used = used + 1, updated_at = excluded.updated_at WHERE used < ?").bind(owner, day, bucket, Date.now(), limit).run();
+  const usage = await runtime().DB.prepare("SELECT used FROM daily_usage WHERE owner_email = ? AND usage_date = ? AND bucket = ?").bind(owner, day, bucket).first<{ used: number }>();
+  const used = usage?.used || 0;
+  return { allowed: Boolean(result.meta.changes), remaining: Math.max(0, limit - used) };
 }
 
 export function safeFilename(name: string) {
@@ -37,6 +50,7 @@ export async function ensureSchema() {
     DB.prepare("CREATE INDEX IF NOT EXISTS context_phrases_owner_idx ON context_phrases(owner_email, category)"),
     DB.prepare("CREATE TABLE IF NOT EXISTS shared_project_reads (owner_email TEXT NOT NULL, project_id TEXT NOT NULL, read_at INTEGER NOT NULL, PRIMARY KEY (owner_email, project_id))"),
     DB.prepare("CREATE INDEX IF NOT EXISTS shared_project_reads_owner_idx ON shared_project_reads(owner_email, read_at)"),
+    DB.prepare("CREATE TABLE IF NOT EXISTS daily_usage (owner_email TEXT NOT NULL, usage_date TEXT NOT NULL, bucket TEXT NOT NULL, used INTEGER DEFAULT 0 NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (owner_email, usage_date, bucket))"),
   ]);
   const columns = await DB.prepare("PRAGMA table_info(jobs)").all<{ name: string }>();
   const names = new Set(columns.results.map((column) => column.name));

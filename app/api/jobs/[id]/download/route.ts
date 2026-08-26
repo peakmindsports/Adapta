@@ -2,7 +2,7 @@ import { AlignmentType, Document, HeadingLevel, ImageRun, Packer, PageBreak, Par
 import { decodePDFRawStream, PDFDocument, PDFName, PDFNumber, PDFRawStream, StandardFonts, rgb } from "pdf-lib";
 import UPNG from "@pdf-lib/upng";
 import jpeg from "jpeg-js";
-import { ensureSchema, jsonError, ownerFrom, runtime, safeFilename } from "../../../_shared";
+import { authenticationError, ensureSchema, jsonError, ownerFrom, runtime, safeFilename } from "../../../_shared";
 
 type Block = { type: "heading" | "bullet" | "checkbox" | "number" | "paragraph" | "tableRow" | "card" | "break" | "image" | "match"; text: string; second?: string; level?: number; cells?: string[] };
 type SourceImage = { bytes: Uint8Array; width: number; height: number; type: "jpg" | "png" };
@@ -282,7 +282,7 @@ async function sourceImages(jobId: string, owner: string, requested: number[] = 
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
-  await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request);
+  await ensureSchema(); const { id } = await context.params; const owner = ownerFrom(request); if (!owner) return authenticationError();
   const job = await runtime().DB.prepare("SELECT title, result, kind, student_name AS student, current_course AS course, subject, academic_year AS academicYear FROM jobs WHERE id = ? AND owner_email = ? AND status = 'completed'").bind(id, owner).first<{ title: string; result: string; kind: string; student?: string; course?: string; subject?: string; academicYear?: string }>();
   if (!job?.result) return jsonError("El documento aún no está disponible.", 404);
   const url = new URL(request.url); const format = url.searchParams.get("format") === "docx" ? "docx" : "pdf"; const requested = (url.searchParams.get("units") || "").split(",").map(Number).filter((value) => Number.isInteger(value) && value > 0); const scopeValue = url.searchParams.get("scope"); const scope: DownloadScope = scopeValue === "student" || scopeValue === "teacher" ? scopeValue : "all"; const repaired = repairEvaluationLabels(clarifyAmbiguousActivities(repairIndex(job.result))); const scoped = resourceForScope(repaired, requested, scope); const result = studentSafeMarkdown(scoped); const unitSuffix = requested.length ? `-UDI-${requested.join("-")}` : ""; const scopeSuffix = scope === "student" ? "-Alumnado" : scope === "teacher" ? "-Docente" : "-Completo"; const filename = `${safeFilename(job.title)}${unitSuffix}${scopeSuffix}`; const safeMode = url.searchParams.get("safe") === "1"; let images: Array<SourceImage | null> = []; if (!safeMode) { try { images = await sourceImages(id, owner, requested, requiredImages(result)); } catch { images = []; } } const fallbackCover = generatedFallbackCover; let coverImage = images.find((image): image is SourceImage => Boolean(image)) || fallbackCover(); const cover: CoverDetails = { subject: job.subject, student: job.student, course: job.course, academicYear: job.academicYear, audience: scope };

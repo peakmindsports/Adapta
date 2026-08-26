@@ -71,3 +71,10 @@
 .project-adaptation-audience span{font-size:.82rem;color:#676b82}.project-general-adaptation{border-top:5px solid #6c75c9;background:linear-gradient(180deg,#f8f7ff,#fff 170px)}
 .general-project-material{display:grid;gap:12px;margin-top:18px}.general-project-material h3,.general-project-material>p{margin:0}.general-project-material>p{color:#62657d;line-height:1.45}
 @media(max-width:720px){.project-adaptation-audience{grid-template-columns:1fr}}
+.signin-button,.signout-button{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap}
+.signin-button{padding:11px 15px;background:var(--coral);color:#fff;box-shadow:0 3px 0 var(--coral-dark)}
+.signin-button:hover{transform:translateY(-1px);box-shadow:0 4px 0 var(--coral-dark)}
+.signout-button{padding:8px 9px;border:1px solid #d8ddd9;background:#fff;color:#617074}
+.public-access-note{margin:-23px 0 28px!important;padding:10px 12px;border-left:3px solid var(--blue);border-radius:0 7px 7px 0;background:#eaf5f4;color:#42676c!important;font-size:12px!important;line-height:1.5!important;max-width:650px!important}
+@media(max-width:900px){.signout-button{display:none}}
+@media(max-width:620px){.signin-button{padding:9px 10px;font-size:9px}.public-access-note{margin-top:-15px!important}.site-header nav{display:none}}

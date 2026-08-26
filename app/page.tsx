@@ -115,6 +115,9 @@ export default function Home() {
   const [sharingProject, setSharingProject] = useState("");
   const [showAdmin, setShowAdmin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [accountName, setAccountName] = useState("");
   const [models, setModels] = useState<ApiModel[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [modelNote, setModelNote] = useState("");
@@ -133,7 +136,21 @@ export default function Home() {
   const updateProjectStudent = (id: string, patch: Partial<BatchStudent>) => setProjectStudents((students) => students.map((student) => student.id === id ? { ...student, ...patch } : student));
   const addProjectStudent = () => setProjectStudents((students) => [...students, newBatchStudent()]);
   const removeProjectStudent = (id: string) => setProjectStudents((students) => students.length > 1 ? students.filter((student) => student.id !== id) : students);
-  useEffect(() => { fetch("/api/session").then((response) => response.ok ? response.json() : { isAdmin: false }).then((session) => setIsAdmin(Boolean(session.isAdmin))).catch(() => setIsAdmin(false)); }, []);
+  useEffect(() => {
+    fetch("/api/session")
+      .then((response) => response.ok ? response.json() : { authenticated: false, isAdmin: false })
+      .then((session) => {
+        setIsAuthenticated(Boolean(session.authenticated));
+        setIsAdmin(Boolean(session.isAdmin));
+        setAccountName(session.displayName || session.email || "");
+        if (session.authenticated) {
+          const requested = new URLSearchParams(window.location.search).get("view") as View | null;
+          if (requested && ["adaptacion", "proyecto", "orientacion"].includes(requested)) { viewRef.current = requested; setView(requested); }
+        }
+      })
+      .catch(() => { setIsAuthenticated(false); setIsAdmin(false); })
+      .finally(() => setSessionLoaded(true));
+  }, []);
   useEffect(() => {
     const refresh = () => fetch("/api/shared-projects").then((response) => response.ok ? response.json() : { projects: [] }).then((body) => setSharedProjects(body.projects)).catch(() => undefined);
     void refresh();
@@ -146,7 +163,14 @@ export default function Home() {
   const updateBatchLevelMaterial = (id: string, levelMaterial: File[]) => setBatchStudents((students) => students.map((student) => student.id === id ? { ...student, levelMaterial } : student));
   const updateBatchContext = (id: string, context: StudentContext) => setBatchStudents((students) => students.map((student) => student.id === id ? { ...student, context } : student));
   const removeBatchStudent = (id: string) => setBatchStudents((students) => students.length > 2 ? students.filter((student) => student.id !== id) : students);
-  const go = (next: View) => { setNotice(""); if (!processing) { setResult(""); setActiveJob(""); setAdaptedProject(null); setProgress(0); setProgressLabel(""); } viewRef.current = next; setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const go = (next: View) => {
+    if (next !== "home" && !isAuthenticated) {
+      const returnTo = `${window.location.pathname}?view=${encodeURIComponent(next)}`;
+      window.location.assign(`/signin-with-chatgpt?return_to=${encodeURIComponent(returnTo)}`);
+      return;
+    }
+    setNotice(""); if (!processing) { setResult(""); setActiveJob(""); setAdaptedProject(null); setProgress(0); setProgressLabel(""); } viewRef.current = next; setView(next); window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const loadHistory = async () => {
     const response = await fetch("/api/jobs");
     if (!response.ok) return;
@@ -407,19 +431,20 @@ export default function Home() {
   };
 
   return <main>
-    <button type="button" className={`library-launch ${isAdmin ? "admin-visible" : "user-visible"}`} onClick={openLibrary}>◫ Biblioteca compartida</button>
+    {isAuthenticated && <button type="button" className={`library-launch ${isAdmin ? "admin-visible" : "user-visible"}`} onClick={openLibrary}>◫ Biblioteca compartida</button>}
     {showManual && <UserManual onClose={() => setShowManual(false)} />}
     {showLibrary && <SharedLibrary ownProjects={history.filter((job) => job.kind.startsWith("project") && job.status === "completed")} projects={sharedProjects} busy={sharingProject} onClose={() => setShowLibrary(false)} onToggle={toggleProjectSharing} onCopy={copySharedProject} />}
     {showHistory && history.length > 0 && <button type="button" className="history-delete-all" disabled={deletingHistory} onClick={deleteAllHistory}>{deletingHistory ? "Eliminando todo…" : `Eliminar todo (${history.length})`}</button>}
     <header className="site-header">
       <button className="brand" onClick={() => go("home")} aria-label="Ir al inicio"><span className="brand-mark">A<span>+</span></span><span><strong>Adapta</strong><small>Docencia a medida</small><em>Manu Galán Marín</em></span></button>
       <nav aria-label="Navegación principal"><button className={view === "adaptacion" ? "active" : ""} onClick={() => go("adaptacion")}>Adaptaciones</button><button className={view === "proyecto" ? "active" : ""} onClick={() => go("proyecto")}>Proyectos</button><button className={view === "orientacion" ? "active" : ""} onClick={() => go("orientacion")}>Departamento de Orientación</button><button onClick={() => setShowManual(true)}>Manual de uso</button></nav>
-      <div className="header-tools">{isAdmin && <button className="admin-button" onClick={openAdmin}>⚙ Administrador</button>}{unreadSharedCount > 0 && <button type="button" className="shared-notification" onClick={openSharedNotification} aria-label={`${unreadSharedCount} proyecto${unreadSharedCount === 1 ? "" : "s"} compartido${unreadSharedCount === 1 ? "" : "s"} sin leer`}><span aria-hidden="true">🔔</span><b>{unreadSharedCount}</b><small>Proyecto compartido</small></button>}<button className="teacher-pill" onClick={openHistory}><span>MP</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button></div>
+      <div className="header-tools">{isAuthenticated ? <>{isAdmin && <button className="admin-button" onClick={openAdmin}>⚙ Administrador</button>}{unreadSharedCount > 0 && <button type="button" className="shared-notification" onClick={openSharedNotification} aria-label={`${unreadSharedCount} proyecto${unreadSharedCount === 1 ? "" : "s"} compartido${unreadSharedCount === 1 ? "" : "s"} sin leer`}><span aria-hidden="true">🔔</span><b>{unreadSharedCount}</b><small>Proyecto compartido</small></button>}<button className="teacher-pill" onClick={openHistory}><span>{accountName.slice(0, 2).toUpperCase() || "ME"}</span><div><strong>Mi historial</strong><small>Trabajos guardados</small></div></button><a className="signout-button" href="/signout-with-chatgpt">Salir</a></> : sessionLoaded && <a className="signin-button" href="/signin-with-chatgpt?return_to=/">Entrar con ChatGPT</a>}</div>
     </header>
     {view === "home" && <div className="home-view">
       <section className="hero">
         <div className="hero-copy"><span className="hero-tag"><i /> Inteligencia artificial al servicio de la inclusión</span><h1>Cada persona aprende<br /><em>a su manera.</em></h1><p>Convierte tus unidades didácticas en experiencias accesibles, ajustadas al nivel real de cada estudiante y listas para llevar al aula.</p>
           <div className="hero-actions"><button className="primary" onClick={() => go("adaptacion")}>Crear una adaptación <span>→</span></button><button className="project-hero-button" onClick={() => go("proyecto")}>Diseñar un proyecto <span>→</span></button><button className="orientation-hero-button" onClick={() => go("orientacion")}>Departamento de Orientación <span>→</span></button></div>
+          {!isAuthenticated && <p className="public-access-note">Puedes conocer la plataforma libremente. Para crear recursos y guardar trabajos, entra de forma segura con tu cuenta de ChatGPT.</p>}
           <div className="trust-line"><span className="avatar-stack"><i>LM</i><i>AS</i><i>JR</i></span><span>Diseñado junto a docentes<br /><strong>para simplificar, no para sustituir.</strong></span></div>
         </div>
         <div className="hero-visual" aria-label="Ejemplo visual de una adaptación curricular"><div className="paper-grid" /><div className="student-card"><span className="student-avatar">N</span><div><small>ESTUDIANTE</small><strong>Noa Martínez</strong><p>5º Primaria · Nivel 2º</p></div><span className="status">Adaptando</span></div><div className="flow-card original"><span className="book-icon">5º</span><div><small>CONTENIDO ORIGINAL</small><strong>Las fracciones</strong><p>Matemáticas · Unidad 6</p></div></div><div className="connector"><span>✦</span></div><div className="flow-card adapted"><span className="book-icon">2º</span><div><small>PROPUESTA ADAPTADA</small><strong>Repartimos en partes</strong><p>Apoyo visual · Manipulativo</p></div><b>✓</b></div><div className="pencil-shape" /><div className="spark s1">✦</div><div className="spark s2">✦</div></div>
