@@ -8,7 +8,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const { DB } = runtime();
   const job = await DB.prepare("SELECT kind, status FROM jobs WHERE id = ? AND owner_email = ?").bind(id, owner).first<{ kind: string; status: string }>();
   if (!job) return jsonError("Recurso no encontrado.", 404);
-  if (job.kind !== "adaptation" && !job.kind.startsWith("project")) return jsonError("Este tipo de recurso no se puede compartir.");
+  if (job.kind !== "adaptation" && job.kind !== "reinforcement" && !job.kind.startsWith("project")) return jsonError("Este tipo de recurso no se puede compartir.");
   if (job.status !== "completed") return jsonError("El recurso debe estar terminado antes de compartirlo.", 409);
 
   if (!body.shared) {

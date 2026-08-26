@@ -1,9 +1,9 @@
 import { authenticationError, ensureSchema, jsonError, activeOwnerFrom, runtime } from "../_shared";
 
 function sharedTitle(resource: Record<string, any>) {
-  if (resource.kind !== "adaptation") return resource.title;
-  const route = resource.currentCourse && resource.targetCourse ? resource.currentCourse + " → " + resource.targetCourse : resource.currentCourse || resource.targetCourse;
-  return ["Adaptación compartida", resource.subject, route].filter(Boolean).join(" · ");
+  if (resource.kind !== "adaptation" && resource.kind !== "reinforcement") return resource.title;
+  const route = resource.kind === "reinforcement" ? resource.currentCourse : resource.currentCourse && resource.targetCourse ? resource.currentCourse + " → " + resource.targetCourse : resource.currentCourse || resource.targetCourse;
+  return [resource.kind === "reinforcement" ? "PRA compartido" : "Adaptación compartida", resource.subject, route].filter(Boolean).join(" · ");
 }
 
 function redactStudentNames(result: string, studentNames: string) {
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   if (!source?.result) return jsonError("Este recurso ya no está compartido.", 404);
   const id = crypto.randomUUID(); const now = Date.now();
   const title = sharedTitle(source);
-  const safeResult = source.kind === "adaptation" && source.student_name ? redactStudentNames(String(source.result), String(source.student_name)) : source.result;
+  const safeResult = (source.kind === "adaptation" || source.kind === "reinforcement") && source.student_name ? redactStudentNames(String(source.result), String(source.student_name)) : source.result;
   await runtime().DB.prepare("INSERT INTO jobs (id, owner_email, kind, title, current_course, target_course, subject, academic_year, teacher_name, status, result, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?)").bind(id, owner, source.kind, `Copia · ${title}`, source.currentCourse, source.targetCourse, source.subject, source.academic_year, source.teacher_name, safeResult, now, now).run();
   return Response.json({ job: { id, title: `Copia · ${title}`, status: "completed" } }, { status: 201 });
 }

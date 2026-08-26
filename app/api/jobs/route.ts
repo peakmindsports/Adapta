@@ -11,10 +11,10 @@ export async function POST(request: Request) {
   await ensureSchema();
   const owner = await activeOwnerFrom(request); if (!owner) return authenticationError();
   const body = await request.json() as Record<string, string>;
-  if (!body.kind || !["adaptation", "project", "project_adaptation"].includes(body.kind)) return jsonError("Tipo de trabajo no válido.");
+  if (!body.kind || !["adaptation", "reinforcement", "project", "project_adaptation"].includes(body.kind)) return jsonError("Tipo de trabajo no válido.");
   const id = crypto.randomUUID();
   const now = Date.now();
-  let title = body.kind === "adaptation" ? `Adaptación · ${body.studentName || "Sin nombre"}` : `Proyecto · ${body.theme || body.currentCourse || "Sin título"}`;
+  let title = body.kind === "reinforcement" ? `PRA · ${body.studentName || "Sin nombre"}` : body.kind === "adaptation" ? `ACS · ${body.studentName || "Sin nombre"}` : `Proyecto · ${body.theme || body.currentCourse || "Sin título"}`;
   if (body.kind === "project_adaptation") title = "Proyecto adaptado · " + (body.theme || body.currentCourse || "Sin título") + " · " + (body.studentName || body.targetCourse || "Nivel personalizado");
   const subject = body.kind.startsWith("project") ? "Interdisciplinar" : body.subject || null;
   await runtime().DB.prepare("INSERT INTO jobs (id, owner_email, kind, title, student_name, current_course, target_course, subject, academic_year, teacher_name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").bind(id, owner, body.kind, title, body.studentName || null, body.currentCourse || null, body.targetCourse || null, subject, body.academicYear || null, body.teacherName || null, now, now).run();
