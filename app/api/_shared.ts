@@ -83,6 +83,8 @@ export async function ensureSchema() {
     DB.prepare("CREATE INDEX IF NOT EXISTS context_phrases_owner_idx ON context_phrases(owner_email, category)"),
     DB.prepare("CREATE TABLE IF NOT EXISTS shared_project_reads (owner_email TEXT NOT NULL, project_id TEXT NOT NULL, read_at INTEGER NOT NULL, PRIMARY KEY (owner_email, project_id))"),
     DB.prepare("CREATE INDEX IF NOT EXISTS shared_project_reads_owner_idx ON shared_project_reads(owner_email, read_at)"),
+    DB.prepare("CREATE TABLE IF NOT EXISTS shared_resource_recipients (job_id TEXT NOT NULL, owner_email TEXT NOT NULL, recipient_email TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (job_id, recipient_email))"),
+    DB.prepare("CREATE INDEX IF NOT EXISTS shared_resource_recipient_idx ON shared_resource_recipients(recipient_email, created_at DESC)"),
     DB.prepare("CREATE TABLE IF NOT EXISTS daily_usage (owner_email TEXT NOT NULL, usage_date TEXT NOT NULL, bucket TEXT NOT NULL, used INTEGER DEFAULT 0 NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (owner_email, usage_date, bucket))"),
     DB.prepare("CREATE TABLE IF NOT EXISTS app_users (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, blocked INTEGER DEFAULT 0 NOT NULL, deleted INTEGER DEFAULT 0 NOT NULL, first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL)"),
     DB.prepare("CREATE TABLE IF NOT EXISTS api_usage (id TEXT PRIMARY KEY NOT NULL, owner_email TEXT NOT NULL, operation TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER DEFAULT 0 NOT NULL, output_tokens INTEGER DEFAULT 0 NOT NULL, estimated_cost_usd REAL, created_at INTEGER NOT NULL)"),
@@ -90,6 +92,7 @@ export async function ensureSchema() {
     DB.prepare("CREATE TABLE IF NOT EXISTS improvement_proposals (id TEXT PRIMARY KEY NOT NULL, owner_email TEXT NOT NULL, category TEXT NOT NULL, message TEXT NOT NULL, status TEXT DEFAULT 'pending' NOT NULL, created_at INTEGER NOT NULL)"),
     DB.prepare("CREATE INDEX IF NOT EXISTS improvement_proposals_created_idx ON improvement_proposals(created_at DESC)"),
   ]);
+  await DB.prepare("UPDATE jobs SET shared_at = NULL WHERE shared_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM shared_resource_recipients WHERE shared_resource_recipients.job_id = jobs.id)").run();
   const columns = await DB.prepare("PRAGMA table_info(jobs)").all<{ name: string }>();
   const names = new Set(columns.results.map((column) => column.name));
   const additions = [

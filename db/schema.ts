@@ -50,3 +50,10 @@ export const sharedProjectReads = sqliteTable("shared_project_reads", {
   projectId: text("project_id").notNull(),
   readAt: integer("read_at", { mode: "timestamp_ms" }).notNull(),
 }, (table) => [primaryKey({ columns: [table.ownerEmail, table.projectId] })]);
+
+export const sharedResourceRecipients = sqliteTable("shared_resource_recipients", {
+  jobId: text("job_id").notNull().references(() => jobs.id, { onDelete: "cascade" }),
+  ownerEmail: text("owner_email").notNull(),
+  recipientEmail: text("recipient_email").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [primaryKey({ columns: [table.jobId, table.recipientEmail] })]);
