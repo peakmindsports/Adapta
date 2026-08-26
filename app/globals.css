@@ -60,3 +60,8 @@
 .adapted-project-batch-results>article{padding:20px;border:1px solid #cae1e5;border-radius:18px;background:#fff}
 .adapted-project-batch-results>article>header{display:flex;justify-content:space-between;gap:14px;margin-bottom:14px;color:#295f6b}
 @media(max-width:720px){.project-mode-selector{grid-template-columns:1fr}.adapted-project-batch-results>article>header{flex-direction:column}}
+.project-four-uploads{display:grid;gap:14px}
+.project-material-per-student{padding:18px 20px;border:1px dashed #6c75c9;border-radius:15px;background:#f3f2ff;color:#343a73}
+.project-material-per-student p{margin:6px 0 0;line-height:1.5}
+.project-level-materials{display:grid;gap:12px;margin:18px 0;padding:18px;border-radius:16px;background:#f7f6ff;border:1px solid #d8d5f1}
+.project-level-materials h3,.project-level-materials>p{margin:0}.project-level-materials>p{color:#62657d;line-height:1.45}
