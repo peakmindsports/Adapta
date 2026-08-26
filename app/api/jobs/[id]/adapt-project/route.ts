@@ -20,7 +20,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const model = setting?.model || OPENAI_MODEL || "gpt-5-mini";
   let data: any = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: prompt, max_output_tokens: 7500 }) });
+    const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: prompt, max_output_tokens: 7500, store: false }) });
     data = await response.json() as any; if (response.ok) break;
     if (response.status !== 429 || attempt === 4) return jsonError(data?.error?.message || "No se pudo adaptar el proyecto.", response.status === 429 ? 429 : 500);
     const seconds = Number(response.headers.get("retry-after")) || Number(data?.error?.message?.match(/try again in ([\d.]+)s/i)?.[1]) || 15;
