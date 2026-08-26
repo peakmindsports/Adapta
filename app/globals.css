@@ -110,3 +110,25 @@
 .project-common-requirements > p { margin: 12px 0; color: #526365; }
 .project-common-requirements textarea { width: 100%; min-height: 118px; resize: vertical; }
 @media (max-width: 720px) { .project-common-heading { flex-direction: column; } }
+/* Archivo de trabajos: base blanca y color solo en acciones */
+.history-panel-wide { background: #ffffff !important; }
+.history-panel-wide h2 { color: var(--ink); }
+.history-panel-wide .history-filters { background: #ffffff !important; border-color: #e1e7e4 !important; }
+.history-panel-wide .history-filters input,
+.history-panel-wide .history-filters select,
+.history-panel-wide .history-filters select:nth-of-type(1),
+.history-panel-wide .history-filters select:nth-of-type(2),
+.history-panel-wide .history-filters select:nth-of-type(3),
+.history-panel-wide .history-filters select:nth-of-type(4) { background: #ffffff !important; border-color: #d8e1dd !important; }
+.history-panel-wide .history-list article,
+.history-panel-wide .history-list article:nth-child(even) { background: #ffffff !important; border-color: #e1e6e3 !important; box-shadow: 0 4px 14px rgba(35, 62, 64, .045); }
+.history-panel-wide .history-copy > span { color: #4f8e88 !important; }
+.history-panel-wide .history-downloads > button:not(.history-delete),
+.history-panel-wide .history-download-menu > summary { background: #dcefeb !important; border-color: #bddfd8 !important; color: #285f59 !important; }
+.history-panel-wide .history-downloads .history-delete { background: #f9e7e7 !important; border-color: #edcaca !important; color: #944f50 !important; }
+.history-panel-wide .history-downloads .history-delete:hover { background: #efcccc !important; color: #7d3f40 !important; }
+.history-panel-wide .history-download-menu a { background: #dcebf3 !important; border-color: #bed7e3 !important; color: #315f72 !important; }
+.history-panel-wide .history-scope-options button { background: #f3f8f6 !important; border-color: #d4e4df !important; color: #456761 !important; }
+.history-panel-wide .history-scope-options button.selected { background: #cfe8e2 !important; border-color: #a9d4ca !important; color: #285e57 !important; box-shadow: 0 0 0 3px #edf7f4 !important; }
+.history-panel-wide .history-format-options button { background: #dcebf3 !important; border-color: #bed7e3 !important; color: #315f72 !important; }
+.history-panel-wide .history-delete-all { background: #f9e7e7 !important; border-color: #edcaca !important; color: #944f50 !important; }
