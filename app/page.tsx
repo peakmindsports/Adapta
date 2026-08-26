@@ -149,22 +149,34 @@ export default function Home() {
   const updateProjectStudent = (id: string, patch: Partial<BatchStudent>) => setProjectStudents((students) => students.map((student) => student.id === id ? { ...student, ...patch } : student));
   const addProjectStudent = () => setProjectStudents((students) => [...students, newBatchStudent()]);
   const removeProjectStudent = (id: string) => setProjectStudents((students) => students.length > 1 ? students.filter((student) => student.id !== id) : students);
-  useEffect(() => {
-    fetch("/api/session")
-      .then((response) => response.ok ? response.json() : { authenticated: false, isAdmin: false })
-      .then((session) => {
-        setIsAuthenticated(Boolean(session.authenticated));
-        setIsAdmin(Boolean(session.isAdmin));
-        setAccountName(session.displayName || session.email || "");
-        setPublicEnabled(session.publicEnabled !== false);
-        setAccountBlocked(Boolean(session.blocked));
-        if (session.authenticated) {
-          const requested = new URLSearchParams(window.location.search).get("view") as View | null;
-          if (requested && ["adaptacion", "proyecto", "orientacion"].includes(requested)) { viewRef.current = requested; setView(requested); }
+useEffect(() => {
+    let cancelled = false;
+    const loadSession = async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const response = await fetch("/api/session", { cache: "no-store" });
+          if (!response.ok) throw new Error("No se pudo recuperar la sesión.");
+          const session = await response.json();
+          if (cancelled) return;
+          setIsAuthenticated(Boolean(session.authenticated));
+          setIsAdmin(Boolean(session.isAdmin));
+          setAccountName(session.displayName || session.email || "");
+          setPublicEnabled(session.publicEnabled !== false);
+          setAccountBlocked(Boolean(session.blocked));
+          if (session.authenticated) {
+            const requested = new URLSearchParams(window.location.search).get("view") as View | null;
+            if (requested && ["adaptacion", "proyecto", "orientacion"].includes(requested)) { viewRef.current = requested; setView(requested); }
+          }
+          setSessionLoaded(true);
+          return;
+        } catch {
+          if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 700 * (attempt + 1)));
         }
-      })
-      .catch(() => { setIsAuthenticated(false); setIsAdmin(false); })
-      .finally(() => setSessionLoaded(true));
+      }
+      if (!cancelled) { setIsAuthenticated(false); setIsAdmin(false); setSessionLoaded(true); }
+    };
+    void loadSession();
+    return () => { cancelled = true; };
   }, []);
   useEffect(() => {
     const refresh = () => fetch("/api/shared-projects").then((response) => response.ok ? response.json() : { projects: [] }).then((body) => setSharedProjects(body.projects)).catch(() => undefined);
