@@ -87,6 +87,8 @@ export async function ensureSchema() {
     DB.prepare("CREATE TABLE IF NOT EXISTS app_users (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, blocked INTEGER DEFAULT 0 NOT NULL, deleted INTEGER DEFAULT 0 NOT NULL, first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL)"),
     DB.prepare("CREATE TABLE IF NOT EXISTS api_usage (id TEXT PRIMARY KEY NOT NULL, owner_email TEXT NOT NULL, operation TEXT NOT NULL, model TEXT NOT NULL, input_tokens INTEGER DEFAULT 0 NOT NULL, output_tokens INTEGER DEFAULT 0 NOT NULL, estimated_cost_usd REAL, created_at INTEGER NOT NULL)"),
     DB.prepare("CREATE INDEX IF NOT EXISTS api_usage_owner_created_idx ON api_usage(owner_email, created_at DESC)"),
+    DB.prepare("CREATE TABLE IF NOT EXISTS improvement_proposals (id TEXT PRIMARY KEY NOT NULL, owner_email TEXT NOT NULL, category TEXT NOT NULL, message TEXT NOT NULL, status TEXT DEFAULT 'pending' NOT NULL, created_at INTEGER NOT NULL)"),
+    DB.prepare("CREATE INDEX IF NOT EXISTS improvement_proposals_created_idx ON improvement_proposals(created_at DESC)"),
   ]);
   const columns = await DB.prepare("PRAGMA table_info(jobs)").all<{ name: string }>();
   const names = new Set(columns.results.map((column) => column.name));
