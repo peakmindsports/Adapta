@@ -9,7 +9,7 @@ export async function GET(request: Request) {
       COUNT(a.id) AS queries, COALESCE(SUM(a.input_tokens), 0) AS inputTokens, COALESCE(SUM(a.output_tokens), 0) AS outputTokens,
       COALESCE(SUM(a.estimated_cost_usd), 0) AS estimatedCostUsd
       FROM app_users u LEFT JOIN api_usage a ON a.owner_email = u.email
-      WHERE u.deleted = 0 GROUP BY u.email ORDER BY u.last_seen_at DESC`).all(),
+      WHERE u.deleted = 0 GROUP BY u.email ORDER BY estimatedCostUsd DESC, COALESCE(NULLIF(TRIM(u.display_name), ''), u.email) COLLATE NOCASE ASC, u.email COLLATE NOCASE ASC`).all(),
     DB.prepare("SELECT model FROM user_settings WHERE owner_email = 'site-public-visibility'").first<{ model: string }>(),
   ]);
   return Response.json({ users: users.results, publicEnabled: setting?.model !== "disabled", currency: "USD" });

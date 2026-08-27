@@ -153,3 +153,19 @@ test("gives each orientation source option its own color", async () => {
   assert.match(css, /\.orientation-source-selector button\.active\{border-color:var\(--source-accent\)/);
   assert.match(css, /content:"Seleccionado"/);
 });
+test("keeps identified people collapsed and orders them by cost then alphabetically", async () => {
+  const [page, usersRoute, css] = await Promise.all([
+    readProjectFile("app/page.tsx"),
+    readProjectFile("app/api/admin/users/route.ts"),
+    readProjectFile("app/globals.css"),
+  ]);
+
+  assert.match(page, /const \[showAdminUsers, setShowAdminUsers\] = useState\(false\)/);
+  assert.match(page, /aria-expanded=\{showAdminUsers\} aria-controls="admin-user-list"/);
+  assert.match(page, /\{showAdminUsers && <div id="admin-user-list"/);
+  assert.match(page, /Number\(b\.estimatedCostUsd\) - Number\(a\.estimatedCostUsd\)/);
+  assert.match(page, /localeCompare\(b\.displayName \|\| b\.email, "es", \{ sensitivity: "base" \}\)/);
+  assert.match(usersRoute, /ORDER BY estimatedCostUsd DESC/);
+  assert.match(usersRoute, /COLLATE NOCASE ASC/);
+  assert.match(css, /\.admin-users-content\{padding-top:8px\}/);
+});
