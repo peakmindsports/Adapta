@@ -104,3 +104,23 @@ test("keeps history and sign out visible on tablets and phones and restores Noa 
   assert.match(css, /bottom:max\(16px,env\(safe-area-inset-bottom\)\)/);
   assert.match(css, /\.mobile-account-actions button,\.mobile-account-actions a\{min-height:42px/);
 });
+test("asks for the exact improvement location and securely supports image evidence", async () => {
+  const [page, css, feedback] = await Promise.all([
+    readProjectFile("app/page.tsx"),
+    readProjectFile("app/globals.css"),
+    readProjectFile("app/api/feedback/route.ts"),
+  ]);
+
+  assert.match(page, /Indica dónde habría que hacer el cambio/);
+  assert.match(page, /pantalla, el apartado y, si es posible, el botón o campo/);
+  assert.match(page, /type="file" accept="image\/jpeg,image\/png,image\/webp,image\/gif" multiple/);
+  assert.match(page, /feedbackImages\.forEach\(\(image\) => form\.append\("images", image\)\)/);
+  assert.match(page, /Evita que aparezcan datos personales del alumnado/);
+  assert.match(page, /admin-proposal-images/);
+  assert.match(css, /\.feedback-guidance\{/);
+  assert.match(feedback, /const MAX_IMAGES = 3/);
+  assert.match(feedback, /const MAX_IMAGE_BYTES = 8 \* 1024 \* 1024/);
+  assert.match(feedback, /runtime\(\)\.FILES\.put\(`feedback\/\$\{proposal\.id\}/);
+  assert.match(feedback, /if \(!isSiteAdmin\(request\)\)/);
+  assert.match(feedback, /imageKey\.startsWith\("feedback\/"\)/);
+});
