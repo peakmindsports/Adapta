@@ -24,6 +24,7 @@ const subjects = ["Matemáticas", "Lengua Castellana", "Conocimiento del Medio",
 const today = new Date();
 const schoolYearStart = today.getMonth() >= 7 ? today.getFullYear() : today.getFullYear() - 1;
 const academicYears = Array.from({ length: 8 }, (_, index) => `${schoolYearStart - index}/${schoolYearStart - index + 1}`);
+const MAX_JOB_BYTES = 600 * 1024 * 1024;
 const projectSubjects: Array<{ id: "project_math" | "project_language" | "project_science" | "project_english"; programId: "project_math_program" | "project_language_program" | "project_science_program" | "project_english_program"; criteriaId: "project_math_criteria" | "project_language_criteria" | "project_science_criteria" | "project_english_criteria"; materialId: ProjectMaterialKey; label: string; icon: "math" | "language" | "science" | "english" }> = [
   { id: "project_math", programId: "project_math_program", criteriaId: "project_math_criteria", materialId: "project_math_material", label: "Matemáticas", icon: "math" },
   { id: "project_language", programId: "project_language_program", criteriaId: "project_language_criteria", materialId: "project_language_material", label: "Lengua", icon: "language" },
@@ -323,6 +324,33 @@ useEffect(() => {
     const text = await response.text();
     try { return JSON.parse(text); } catch { return { error: response.status === 503 ? "El servidor interrumpió el proceso porque estaba tardando demasiado. Prueba de nuevo con un solo nivel de destino o reinténtalo dentro de unos minutos." : response.status === 413 ? "La plataforma rechazó un fragmento de la subida. Se ha reducido automáticamente el tamaño de los fragmentos; recarga la página e inténtalo de nuevo." : `El servidor no pudo procesar la solicitud (${response.status}).` }; }
   };
+  const generateReliably = async (jobId: string, payload: Record<string, unknown>, waitingLabel: string) => {
+    let lastError = "No se pudo completar la generación.";
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const response = await fetch(`/api/jobs/${jobId}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        const body = await responseBody(response);
+        if (response.ok && body.result) return body;
+        lastError = body.error || lastError;
+        if (response.status === 429 && /límite diario/i.test(lastError)) throw new Error(lastError);
+        if (![408, 409, 429, 500, 502, 503, 504].includes(response.status)) throw new Error(lastError);
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : lastError;
+        if (/límite diario/i.test(lastError)) throw error;
+      }
+      for (let poll = 0; poll < 60; poll++) {
+        setProgressLabel(`${waitingLabel} · el trabajo sigue guardado y se comprueba automáticamente…`);
+        await new Promise((resolve) => window.setTimeout(resolve, 15_000));
+        try {
+          const savedResponse = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
+          const saved = await responseBody(savedResponse);
+          if (savedResponse.ok && saved.job?.status === "completed" && saved.job?.result) return { result: saved.job.result, recovered: true };
+          if (savedResponse.ok && saved.job?.status === "failed") { lastError = saved.job.error || lastError; break; }
+        } catch { /* Una comprobación fallida no cancela un trabajo que sigue ejecutándose. */ }
+      }
+    }
+    throw new Error(`${lastError} El trabajo permanece en el historial y puede reanudarse sin volver a subir los documentos.`);
+  };
   const recommendLevel = async () => {
     setRecommendation(null); setNotice("");
     if (!studentName.trim() || !currentCourse) { setNotice("Indica el nombre y el curso actual antes de analizar los informes."); return; }
@@ -370,12 +398,12 @@ useEffect(() => {
           ...(adaptationProgram === "significant" ? students.flatMap((student) => student.levelMaterial.map((file) => ({ category: "material" as UploadKey, file }))) : []),
         ];
         const selected = [...curricularDocuments, ...students.flatMap((student) => student.reports.map((file) => ({ category: "dictamen" as UploadKey, file })))];
-        const oversized = selected.find(({ file }) => file.size > 60 * 1024 * 1024); const totalBytes = selected.reduce((sum, { file }) => sum + file.size, 0); if (oversized) throw new Error(`“${oversized.file.name}” supera el límite de 60 MB por documento.`); if (totalBytes > 180 * 1024 * 1024) throw new Error(`La documentación de ${names} supera 180 MB. Divide la adaptación en dos trabajos.`); let uploaded = 0;
+        const oversized = selected.find(({ file }) => file.size > 60 * 1024 * 1024); const totalBytes = selected.reduce((sum, { file }) => sum + file.size, 0); if (totalBytes > MAX_JOB_BYTES) throw new Error(`La documentación de ${names} supera 600 MB. Divídela en dos adaptaciones para mantener un procesamiento seguro.`); if (oversized) throw new Error(`“${oversized.file.name}” supera el límite de 60 MB por documento.`); let uploaded = 0;
         for (const { category, file } of selected) { const total = Math.ceil(file.size / (768 * 1024)); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", category); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * 768 * 1024, Math.min(file.size, (index + 1) * 768 * 1024)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); if (!upload.ok) throw new Error((await responseBody(upload)).error); } uploaded += 1; setProgressLabel(`Documentos para ${names}: ${uploaded} de ${selected.length}`); }
         const generationInstruction = adaptationProgram === "reinforcement" ? `Programa de Refuerzo del Aprendizaje para ${names}. Motivo: ${reinforcementReason}. Aprendizajes prioritarios: ${reinforcementNeeds || "deben deducirse de la documentación y confirmarse"}. Temporalización: ${reinforcementSchedule || "seguimiento y revisión trimestral"}. Mantén obligatoriamente las competencias específicas y criterios de evaluación del curso ${current}; cualquier aprendizaje anterior es apoyo y no sustituye el referente curricular.` : students.length > 1 ? `Adaptación compartida para: ${names}. Todos tienen el mismo curso de matrícula y nivel curricular; utiliza la programación, los criterios y las UDI comunes, junto con el material específico de su nivel, sin exponer diagnósticos individuales.` : `Adaptación individual para ${names}. Utiliza la programación, los criterios y las UDI comunes del curso, el material específico de su nivel de adaptación y su informe personal.`;
         const contextFor = (field: "strengths" | "classroomContext" | "familyContext" | "effectiveSupports") => students.map((student) => `${student.name}: ${student.context[field] || "Sin información añadida"}`).join("\n");
         const individualNotes = students.map((student) => `${student.name}: ${student.context.notes || "Sin indicaciones adicionales"}`).join("\n");
-        setProgress(55 + Math.round((completed / grouped.size) * 38)); setProgressLabel(`Creando adaptación ${students.length > 1 ? "compartida" : "individual"} para ${names} · nivel ${target}`); const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: `${generationInstruction}\nRespeta por separado estas indicaciones individuales:\n${individualNotes}`, studentContext: { strengths: contextFor("strengths"), classroomContext: contextFor("classroomContext"), familyContext: contextFor("familyContext"), effectiveSupports: contextFor("effectiveSupports") } }) }); const body = await responseBody(response); if (!response.ok) throw new Error(body.error); createdResults.push({ jobId: created.job.id, result: body.result, names, level: target }); completed += 1; setProgress(55 + Math.round((completed / grouped.size) * 45));
+        setProgress(55 + Math.round((completed / grouped.size) * 38)); setProgressLabel(`Creando adaptación ${students.length > 1 ? "compartida" : "individual"} para ${names} · nivel ${target}`); const body = await generateReliably(created.job.id, { notes: `${generationInstruction}\nRespeta por separado estas indicaciones individuales:\n${individualNotes}`, studentContext: { strengths: contextFor("strengths"), classroomContext: contextFor("classroomContext"), familyContext: contextFor("familyContext"), effectiveSupports: contextFor("effectiveSupports") } }, `Creando la adaptación de ${names}`); createdResults.push({ jobId: created.job.id, result: body.result, names, level: target }); completed += 1; setProgress(55 + Math.round((completed / grouped.size) * 45));
       }
       setBatchResults(createdResults); setProgress(100); setProgressLabel(`${createdResults.length} adaptación${createdResults.length === 1 ? "" : "es"} creadas y guardadas`); setNotice(`${ready.length} estudiantes agrupados en ${createdResults.length} adaptación${createdResults.length === 1 ? "" : "es"} según su curso y nivel.`); await loadHistory();
     } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudieron crear las adaptaciones múltiples."); } finally { setProcessing(false); }
@@ -436,8 +464,7 @@ useEffect(() => {
         const personalNotes = students.map((student) => student.name + ": " + (student.context.notes || "Sin indicaciones adicionales")).join("\n");
         const adaptationInstruction = (isGeneralProject ? "PROYECTO ADAPTADO GENERAL, sin alumnado concreto, para el nivel " + target : "PROYECTO ADAPTADO para " + names + ", con nivel curricular " + target + ", dentro del aula de " + currentCourse + ". La programación, las UDI y los criterios por asignatura son comunes. Los informes, contextos y materiales del nivel de referencia son específicos. Conserva un único reto y producto final compartido, pero garantiza una participación auténtica y accesible. No muestres nombres, nivel curricular, informes ni datos sensibles en el documento para el alumnado. Indicaciones individuales:\n" + personalNotes) + ";";
         setProgress(55 + Math.round((completed / grouped.size) * 38)); setProgressLabel("Diseñando el proyecto adaptado para " + names + " · " + target);
-        const response = await fetch("/api/jobs/" + created.job.id + "/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: notes + "\n\n" + adaptationInstruction, theme, duration, studentContext: { strengths: contextFor("strengths"), classroomContext: contextFor("classroomContext"), familyContext: contextFor("familyContext"), effectiveSupports: contextFor("effectiveSupports") } }) });
-        const generated = await responseBody(response); if (!response.ok) throw new Error(generated.error || "No se pudo generar el proyecto de " + target + ".");
+        const generated = await generateReliably(created.job.id, { notes: notes + "\n\n" + adaptationInstruction, theme, duration, studentContext: { strengths: contextFor("strengths"), classroomContext: contextFor("classroomContext"), familyContext: contextFor("familyContext"), effectiveSupports: contextFor("effectiveSupports") } }, "Creando el proyecto adaptado de " + target);
         createdResults.push({ jobId: created.job.id, result: generated.result, names, level: target }); completed += 1; setProgress(55 + Math.round((completed / grouped.size) * 45));
       }
       setAdaptedProjectResults(createdResults); setProgress(100); setProgressLabel("Proyectos adaptados completados"); setNotice(isGeneralProject ? "Proyecto adaptado de forma general al nivel " + generalProjectTarget + "." : ready.length + " estudiante(s) atendido(s) en " + createdResults.length + " versión(es) según su nivel curricular."); await loadHistory();
@@ -473,8 +500,7 @@ useEffect(() => {
         const sourceFiles = source === "units" ? files.unidades : orientationOtherMaterial;
         const sourceLabel = source === "units" ? "Unidades didácticas" : "Otro material";
         const selected = [...sourceFiles.map((file) => ({ category: "unidades" as UploadKey, file })), ...level.material.map((file) => ({ category: "material" as UploadKey, file }))];
-        const totalBytes = selected.reduce((sum, item) => sum + item.file.size, 0);
-        if (totalBytes > 180 * 1024 * 1024) throw new Error(`Los documentos de «${sourceLabel}» para ${level.targetCourse} superan 180 MB. Divide ese material.`);
+        if (selected.reduce((sum, item) => sum + item.file.size, 0) > MAX_JOB_BYTES) throw new Error(`Los documentos de «${sourceLabel}» para ${level.targetCourse} superan 600 MB. Divídelos en dos trabajos para mantener un procesamiento seguro.`);
         setProgressLabel(`Creando ${sourceLabel.toLocaleLowerCase("es")} para ${level.targetCourse} · ${taskIndex + 1} de ${pendingTasks.length}`);
         const create = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "adaptation", studentName: `Banco del Departamento de Orientación · ${sourceLabel} · ${level.targetCourse}`, currentCourse, targetCourse: level.targetCourse, subject, academicYear, teacherName }) });
         const created = await responseBody(create); if (!create.ok) throw new Error(created.error || "No se pudo crear el trabajo.");
@@ -484,22 +510,7 @@ useEffect(() => {
           ? `Adapta todas las UDI de ${currentCourse}. Conserva el orden y los nombres reales de las unidades.`
           : `Adapta íntegramente el material propio aportado por el departamento (fichas, cuadernos, dossiers u otros recursos) al nivel de ${level.targetCourse}. No lo trates como una programación anual ni inventes unidades que no existan: respeta su finalidad, temas, orden, secciones y tipo de actividades, pero reescribe explicaciones, consignas, vocabulario, extensión, apoyos y dificultad para que sean adecuados al nivel elegido. Cada archivo de origen debe quedar reconocible y todo su contenido útil debe estar representado en la versión adaptada.`;
         const orientationNotes = `Recurso general e independiente del Departamento de Orientación, correspondiente exclusivamente a «${sourceLabel}». ${sourceInstruction} Toma como referencia los materiales aportados para el nivel de ${level.targetCourse}. No mezcles este documento con el otro tipo de contenido aunque se haya solicitado la opción Ambos. No menciones alumnado concreto, diagnósticos ni nivel competencial en las páginas destinadas al alumnado. Crea una parte para alumnado, visual, motivadora y lista para imprimir, y al final una parte docente con orientaciones de uso, indicadores de evaluación, rúbricas, listas de control y pruebas cuando correspondan al material original.`;
-        let generated: any = null;
-        let generationError = "";
-        for (let attempt = 0; attempt < 4; attempt++) {
-          const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: orientationNotes, studentContext: {} }) });
-          const responseData = await responseBody(response);
-          if (response.ok) { generated = responseData; break; }
-          generationError = responseData.error || `No se pudo generar ${sourceLabel.toLocaleLowerCase("es")} para ${level.targetCourse}.`;
-          const savedResponse = await fetch(`/api/jobs/${created.job.id}`);
-          const saved = await responseBody(savedResponse);
-          if (savedResponse.ok && saved.job?.status === "completed" && saved.job?.result) { generated = { result: saved.job.result }; break; }
-          if (![408, 409, 429, 502, 503, 504].includes(response.status) || attempt === 3) break;
-          const waitSeconds = [15, 30, 60][attempt];
-          setProgressLabel(`${sourceLabel} · ${level.targetCourse} necesita más tiempo. Reintentando en ${waitSeconds} segundos · intento ${attempt + 2} de 4`);
-          await new Promise((resolve) => window.setTimeout(resolve, waitSeconds * 1000));
-        }
-        if (!generated?.result) throw new Error(generationError || `No se pudo generar ${sourceLabel.toLocaleLowerCase("es")} para ${level.targetCourse}. Los documentos ya terminados se conservan: pulsa de nuevo para reanudar.`);
+        const generated = await generateReliably(created.job.id, { notes: orientationNotes, studentContext: {} }, `${sourceLabel} · ${level.targetCourse}`);
         createdResults.push({ jobId: created.job.id, result: generated.result, level: level.targetCourse, source });
         setOrientationResults([...createdResults]);
         setProgress(10 + Math.round(((taskIndex + 1) / pendingTasks.length) * 90));
@@ -516,10 +527,9 @@ useEffect(() => {
     const groups: [UploadKey, File[]][] = kind === "adaptation" || kind === "reinforcement" ? [["dictamen", files.dictamen], ["programacion", files.programacion], ["criterios", files.criterios], ["unidades", files.unidades], ["material", files.material]] : projectSubjects.flatMap((area) => [[area.programId, files[area.programId]], [area.id, files[area.id]], [area.criteriaId, files[area.criteriaId]]] as [UploadKey, File[]][]);
     if (!groups.some(([, list]) => list.length)) { setNotice("Añade al menos un documento antes de generar."); return; }
     const allSelected = groups.flatMap(([category, list]) => list.map((file) => ({ category, file })));
+    if (allSelected.reduce((sum, { file }) => sum + file.size, 0) > MAX_JOB_BYTES) { setNotice("El conjunto supera 600 MB. Divídelo en dos trabajos para mantener un procesamiento seguro."); return; }
     const oversized = allSelected.find(({ file }) => file.size > 60 * 1024 * 1024);
-    const totalBytes = allSelected.reduce((sum, { file }) => sum + file.size, 0);
     if (oversized) { setNotice(`“${oversized.file.name}” supera el límite de 60 MB por documento.`); return; }
-    if (totalBytes > 180 * 1024 * 1024) { setNotice("El conjunto supera 180 MB. Divide la carga en dos trabajos."); return; }
     setProcessing(true); setProgress(2); setProgressLabel("Preparando el trabajo…");
     let generationTimer: ReturnType<typeof setInterval> | undefined;
     try {
@@ -529,11 +539,10 @@ useEffect(() => {
       let completedFiles = 0; let uploadedChunks = 0; const chunkSize = 768 * 1024; const totalChunks = allSelected.reduce((sum, item) => sum + Math.ceil(item.file.size / chunkSize), 0);
       const uploadOne = async ({ category, file }: { category: UploadKey; file: File }) => { const total = Math.ceil(file.size / chunkSize); const uploadId = crypto.randomUUID(); for (let index = 0; index < total; index++) { const form = new FormData(); form.append("category", category); form.append("uploadId", uploadId); form.append("chunkIndex", String(index)); form.append("chunkTotal", String(total)); form.append("originalName", file.name); form.append("originalType", file.type || "application/octet-stream"); form.append("totalSize", String(file.size)); form.append("files", file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize)), `parte-${index}`); const upload = await fetch(`/api/jobs/${created.job.id}/files`, { method: "POST", body: form }); const uploaded = await responseBody(upload); if (!upload.ok) throw new Error(uploaded.error || `No se pudo guardar “${file.name}” (parte ${index + 1}/${total}).`); uploadedChunks += 1; setProgress(Math.min(52, 3 + Math.round((uploadedChunks / totalChunks) * 49))); setProgressLabel(`Subiendo documentos · ${completedFiles + 1} de ${allSelected.length}`); } completedFiles += 1; setNotice(`Documentos subidos: ${completedFiles} de ${allSelected.length}`); };
       const queue = [...allSelected];
-      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => { while (queue.length) { const next = queue.shift(); if (next) await uploadOne(next); } }));
+      await Promise.all(Array.from({ length: Math.min(2, queue.length) }, async () => { while (queue.length) { const next = queue.shift(); if (next) await uploadOne(next); } }));
       setProgress(56); setProgressLabel(kind === "reinforcement" ? "Analizando aprendizajes prioritarios y criterios del curso…" : kind === "adaptation" ? "Analizando las UDI y los criterios…" : "Analizando las áreas y sus criterios…");
       generationTimer = setInterval(() => setProgress((value) => Math.min(94, value + (value < 75 ? 2 : 1))), 1800);
-      const response = await fetch(`/api/jobs/${created.job.id}/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: kind === "reinforcement" ? `MODALIDAD PRA. Motivo: ${reinforcementReason}. Aprendizajes y necesidades prioritarias: ${reinforcementNeeds || "Pendientes de concretar con los documentos"}. Temporalización y revisión: ${reinforcementSchedule || "Seguimiento trimestral"}. Curso del material de apoyo: ${files.material.length ? reinforcementReferenceCourse : "No aportado"}; nunca puede ser inferior en más de un curso al de matrícula. Otras indicaciones: ${notes || "No indicadas"}` : notes, theme, duration, studentContext: { strengths, classroomContext, familyContext, effectiveSupports } }) });
-      const generated = await responseBody(response); if (!response.ok) throw new Error(generated.error || "No se pudo generar la propuesta.");
+      const generated = await generateReliably(created.job.id, { notes: kind === "reinforcement" ? `MODALIDAD PRA. Motivo: ${reinforcementReason}. Aprendizajes y necesidades prioritarias: ${reinforcementNeeds || "Pendientes de concretar con los documentos"}. Temporalización y revisión: ${reinforcementSchedule || "Seguimiento trimestral"}. Curso del material de apoyo: ${files.material.length ? reinforcementReferenceCourse : "No aportado"}; nunca puede ser inferior en más de un curso al de matrícula. Otras indicaciones: ${notes || "No indicadas"}` : notes, theme, duration, studentContext: { strengths, classroomContext, familyContext, effectiveSupports } }, kind === "project" ? "Creando el proyecto" : kind === "reinforcement" ? "Creando el programa de refuerzo" : "Creando el recurso adaptado");
       if (generationTimer) clearInterval(generationTimer); setProgress(100); const isEducationalResponse = kind === "adaptation" || kind === "reinforcement"; setProgressLabel(kind === "reinforcement" ? "PRA completado y guardado · disponible en Adaptaciones y Mi historial" : kind === "adaptation" ? "Recurso completado y guardado · disponible en Adaptaciones y Mi historial" : "Proyecto completado y guardado · disponible en Proyectos y Mi historial"); if (viewRef.current === (isEducationalResponse ? "adaptacion" : "proyecto")) setResult(generated.result); else setResult(""); setNotice(kind === "reinforcement" ? "Programa de Refuerzo del Aprendizaje generado y guardado correctamente." : kind === "adaptation" ? "Recurso generado y guardado correctamente en Mi historial." : "Proyecto generado y guardado correctamente en Mi historial."); await loadHistory();
     } catch (error) { setProgressLabel("El proceso se ha detenido"); setNotice(error instanceof Error ? error.message : "Ha ocurrido un error inesperado."); } finally { if (generationTimer) clearInterval(generationTimer); setProcessing(false); setTimeout(() => document.querySelector(".result-panel, .success-note")?.scrollIntoView({ behavior: "smooth" }), 20); }
   };

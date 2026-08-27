@@ -274,7 +274,7 @@ async function sourceImages(jobId: string, owner: string, requested: number[] = 
           candidates.push({ bytes: new Uint8Array(UPNG.encode([rgba.buffer], width, height, 0)), width, height, type: "png" });
         }
       }
-      const localFingerprints = new Set<string>(); const unique = candidates.filter((candidate) => { const fingerprint = imageFingerprint(candidate); if (localFingerprints.has(fingerprint) || seenImages.has(fingerprint)) return false; localFingerprints.add(fingerprint); return true; }).sort((left, right) => right.width * right.height - left.width * left.height);
+      const localFingerprints = new Set<string>(); const unique = candidates.filter((candidate) => { const fingerprint = imageFingerprint(candidate); if (localFingerprints.has(fingerprint) || seenImages.has(fingerprint)) return false; localFingerprints.add(fingerprint); return true; });
       const chosen = unique.slice(0, needed); chosen.forEach((image) => seenImages.add(imageFingerprint(image))); selected.push(...chosen, ...Array(Math.max(0, needed - chosen.length)).fill(null));
     } catch { selected.push(...Array(needed).fill(null)); /* Un PDF sin imágenes utilizables no desplaza imágenes de otra UDI. */ }
   }

@@ -45,3 +45,33 @@ test("shows and documents the two separate results", async () => {
   assert.match(css, /\.orientation-separate-note/);
   assert.match(css, /@media\(max-width:700px\)\{\.orientation-source-selector\{grid-template-columns:1fr\}\}/);
 });
+test("enforces editorial, pedagogical and manual-input quality", async () => {
+  const generation = await readProjectFile("app/api/jobs/[id]/generate/route.ts");
+  const manual = await readProjectFile("app/manual.tsx");
+
+  assert.match(generation, /CONTRATO TRANSVERSAL DE APORTACIONES MANUALES/);
+  assert.match(generation, /Aportación manual → decisión aplicada/);
+  assert.match(generation, /CONTRATO DE CALIDAD EDITORIAL Y PEDAGÓGICA/);
+  assert.match(generation, /imágenes didácticas originales/);
+  assert.match(generation, /producto final tangible, motivador y adecuado a la edad/);
+  assert.match(generation, /auditoría interna página a página/);
+  assert.match(manual, /cada aportación específica haya producido una decisión visible/);
+});
+
+test("protects long and document-heavy generations", async () => {
+  const page = await readProjectFile("app/page.tsx");
+  const generation = await readProjectFile("app/api/jobs/[id]/generate/route.ts");
+  const download = await readProjectFile("app/api/jobs/[id]/download/route.ts");
+
+  assert.doesNotMatch(generation, /fileRows\.results\.slice\(0, 60\)/);
+  assert.doesNotMatch(page, /El conjunto supera 180 MB/);
+  assert.match(page, /MAX_JOB_BYTES = 600 \* 1024 \* 1024/);
+  assert.match(page, /procesamiento seguro/);
+  assert.match(page, /const generateReliably = async/);
+  assert.match(page, /el trabajo sigue guardado y se comprueba automáticamente/);
+  assert.match(generation, /job\.status === "completed" && job\.result/);
+  assert.match(generation, /job\.status === "generating"/);
+  assert.match(generation, /UPDATE jobs SET updated_at/);
+  assert.match(generation, /quotaLimit = isOrientationBank \? 30 : 3/);
+  assert.doesNotMatch(download, /unique = candidates[\s\S]{0,300}\.sort\(/);
+});
