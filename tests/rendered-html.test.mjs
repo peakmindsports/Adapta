@@ -75,3 +75,18 @@ test("protects long and document-heavy generations", async () => {
   assert.match(generation, /quotaLimit = isOrientationBank \? 30 : 3/);
   assert.doesNotMatch(download, /unique = candidates[\s\S]{0,300}\.sort\(/);
 });
+test("uses a rotating color palette for orientation destination levels", async () => {
+  const [page, css, manual] = await Promise.all([
+    readProjectFile("app/page.tsx"),
+    readProjectFile("app/globals.css"),
+    readProjectFile("app/manual.tsx"),
+  ]);
+
+  assert.match(page, /orientation-level-tone-\$\{\(index % 6\) \+ 1\}/);
+  for (let tone = 1; tone <= 6; tone += 1) {
+    assert.match(css, new RegExp(`\\.orientation-level-tone-${tone}\\{`));
+  }
+  assert.match(css, /border:1px solid var\(--level-border\)/);
+  assert.match(css, /color:var\(--level-accent\)/);
+  assert.match(manual, /Cada nueva tarjeta se identifica automáticamente con un color diferente/);
+});
