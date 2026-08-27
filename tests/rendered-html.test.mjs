@@ -90,3 +90,17 @@ test("uses a rotating color palette for orientation destination levels", async (
   assert.match(css, /color:var\(--level-accent\)/);
   assert.match(manual, /Cada nueva tarjeta se identifica automáticamente con un color diferente/);
 });
+test("keeps history and sign out visible on tablets and phones and restores Noa Martínez", async () => {
+  const [page, css] = await Promise.all([
+    readProjectFile("app/page.tsx"),
+    readProjectFile("app/globals.css"),
+  ]);
+
+  assert.match(page, /className="mobile-account-actions"/);
+  assert.match(page, /<strong>Noa Martínez<\/strong>/);
+  assert.match(page, /student-avatar">NM</);
+  assert.doesNotMatch(page, /Irene Galán|Clara Galán/);
+  assert.match(css, /@media\(max-width:1250px\)\{\.mobile-account-actions\{position:fixed/);
+  assert.match(css, /bottom:max\(16px,env\(safe-area-inset-bottom\)\)/);
+  assert.match(css, /\.mobile-account-actions button,\.mobile-account-actions a\{min-height:42px/);
+});
