@@ -120,7 +120,27 @@ test("asks for the exact improvement location and securely supports image eviden
   assert.match(css, /\.feedback-guidance\{/);
   assert.match(feedback, /const MAX_IMAGES = 3/);
   assert.match(feedback, /const MAX_IMAGE_BYTES = 8 \* 1024 \* 1024/);
-  assert.match(feedback, /runtime\(\)\.FILES\.put\(`feedback\/\$\{proposal\.id\}/);
+  assert.match(feedback, /runtime\(\)\.FILES\.put\(key, file\.stream\(\)/);
   assert.match(feedback, /if \(!isSiteAdmin\(request\)\)/);
-  assert.match(feedback, /imageKey\.startsWith\("feedback\/"\)/);
+  assert.match(feedback, /attachmentKey\.startsWith\("feedback\/"\)/);
+});
+test("accepts generated PDF and Word resources and asks for exact error pages", async () => {
+  const [page, css, feedback] = await Promise.all([
+    readProjectFile("app/page.tsx"),
+    readProjectFile("app/globals.css"),
+    readProjectFile("app/api/feedback/route.ts"),
+  ]);
+
+  assert.match(page, /adjúntalo e indica el error y las páginas concretas/);
+  assert.match(page, /páginas exactas y explica qué debería aparecer y qué aparece realmente/);
+  assert.match(page, /id="feedback-resources" type="file"/);
+  assert.match(page, /application\/pdf,application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document/);
+  assert.match(page, /feedbackResources\.forEach\(\(resource\) => form\.append\("resources", resource\)\)/);
+  assert.match(page, /attachment\.kind === "resource"/);
+  assert.match(css, /\.feedback-resources\{/);
+  assert.match(feedback, /const MAX_RESOURCES = 2/);
+  assert.match(feedback, /const MAX_RESOURCE_BYTES = 40 \* 1024 \* 1024/);
+  assert.match(feedback, /form\.getAll\("resources"\)/);
+  assert.match(feedback, /kind: "resource"/);
+  assert.match(feedback, /Content-Disposition/);
 });
