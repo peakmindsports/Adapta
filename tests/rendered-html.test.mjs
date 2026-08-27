@@ -188,3 +188,14 @@ test("keeps improvement proposals collapsed and links pending alerts to the exac
   assert.match(css, /\.admin-proposal-alert\{/);
   assert.match(css, /article\.proposal-highlighted\{/);
 });
+test("shows Manu Galán Marín beside the brand on tablets and phones", async () => {
+  const [page, css] = await Promise.all([
+    readProjectFile("app/page.tsx"),
+    readProjectFile("app/globals.css"),
+  ]);
+
+  assert.match(page, /<em>Manu Galán Marín<\/em>/);
+  assert.match(css, /@media\(max-width:1250px\)\{\.brand\{flex:none\}\.brand em\{display:block/);
+  assert.match(css, /\.brand em\{display:block;font-size:7px;line-height:1\.15;white-space:nowrap\}/);
+  assert.match(css, /@media\(max-width:420px\)\{\.site-header\{padding-inline:12px\}/);
+});
