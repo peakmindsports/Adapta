@@ -144,3 +144,12 @@ test("accepts generated PDF and Word resources and asks for exact error pages", 
   assert.match(feedback, /kind: "resource"/);
   assert.match(feedback, /Content-Disposition/);
 });
+test("gives each orientation source option its own color", async () => {
+  const css = await readProjectFile("app/globals.css");
+
+  assert.match(css, /\.orientation-source-selector button:nth-child\(1\)\{--source-accent:#277f91/);
+  assert.match(css, /\.orientation-source-selector button:nth-child\(2\)\{--source-accent:#b35443/);
+  assert.match(css, /\.orientation-source-selector button:nth-child\(3\)\{--source-accent:#7056a2/);
+  assert.match(css, /\.orientation-source-selector button\.active\{border-color:var\(--source-accent\)/);
+  assert.match(css, /content:"Seleccionado"/);
+});
