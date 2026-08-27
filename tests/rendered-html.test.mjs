@@ -169,3 +169,22 @@ test("keeps identified people collapsed and orders them by cost then alphabetica
   assert.match(usersRoute, /COLLATE NOCASE ASC/);
   assert.match(css, /\.admin-users-content\{padding-top:8px\}/);
 });
+test("keeps improvement proposals collapsed and links pending alerts to the exact proposal", async () => {
+  const [page, feedback, css] = await Promise.all([
+    readProjectFile("app/page.tsx"),
+    readProjectFile("app/api/feedback/route.ts"),
+    readProjectFile("app/globals.css"),
+  ]);
+
+  assert.match(page, /const \[showAdminProposals, setShowAdminProposals\] = useState\(false\)/);
+  assert.match(page, /aria-expanded=\{showAdminProposals\} aria-controls="admin-proposal-list"/);
+  assert.match(page, /improvementProposals\.some\(\(proposal\) => proposal\.status === "pending"\)/);
+  assert.match(page, /className="admin-proposal-alert" onClick=\{openPendingProposal\}/);
+  assert.match(page, /setShowAdminProposals\(true\); setHighlightedProposalId\(proposal\.id\)/);
+  assert.match(page, /document\.getElementById\(`admin-proposal-\$\{proposal\.id\}`\)/);
+  assert.match(page, /id=\{`admin-proposal-\$\{proposal\.id\}`\}/);
+  assert.match(feedback, /export async function PATCH\(request: Request\)/);
+  assert.match(feedback, /UPDATE improvement_proposals SET status = 'reviewed' WHERE id = \?/);
+  assert.match(css, /\.admin-proposal-alert\{/);
+  assert.match(css, /article\.proposal-highlighted\{/);
+});

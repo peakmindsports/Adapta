@@ -73,3 +73,13 @@ export async function GET(request: Request) {
   }));
   return Response.json({ proposals });
 }
+export async function PATCH(request: Request) {
+  await ensureSchema();
+  if (!isSiteAdmin(request)) return jsonError("Solo la persona administradora puede revisar las propuestas.", 403);
+  const body = await request.json() as { id?: string; status?: string };
+  const id = body.id?.trim();
+  if (!id || body.status !== "reviewed") return jsonError("Petición no válida.", 400);
+  const result = await runtime().DB.prepare("UPDATE improvement_proposals SET status = 'reviewed' WHERE id = ?").bind(id).run();
+  if (!result.meta.changes) return jsonError("Propuesta no encontrada.", 404);
+  return Response.json({ id, status: "reviewed" });
+}
