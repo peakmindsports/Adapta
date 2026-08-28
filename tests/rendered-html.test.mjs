@@ -82,14 +82,14 @@ test("uses a rotating color palette for orientation destination levels", async (
     readProjectFile("app/manual.tsx"),
   ]);
 
-  assert.match(page, /orientation-level-tone-\$\{\(index % 6\) \+ 1\}/);
-  for (let tone = 1; tone <= 6; tone += 1) {
+  assert.match(page, /orientation-level-tone-\$\{\(index % 12\) \+ 1\}/);
+  for (let tone = 1; tone <= 12; tone += 1) {
     assert.match(css, new RegExp(`\\.orientation-level-tone-${tone}\\{`));
   }
   assert.match(css, /border:1px solid var\(--level-border\)/);
   assert.match(css, /color:var\(--level-accent\)/);
   assert.match(css, /\.orientation-level:before\{content:"";position:absolute;inset:0 0 auto;height:7px;background:var\(--level-accent\)/);
-  assert.match(css, /\.orientation-level>header>span\{background:var\(--level-accent\);color:#fff/);
+  assert.match(css, /\.orientation-level>header\{margin:-18px -18px 18px;padding:22px 18px 13px;background:var\(--level-accent\)/);
   assert.match(css, /\.orientation-level \.field select\{border-color:var\(--level-border\);box-shadow:inset 4px 0 0 var\(--level-accent\)/);
   assert.match(manual, /Cada nueva tarjeta se identifica automáticamente con un color diferente/);
 });
