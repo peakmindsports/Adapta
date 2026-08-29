@@ -21,6 +21,7 @@ export default function InitialAssessment() {
   const [curriculum, setCurriculum] = useState<Curriculum | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [loadingCurriculum, setLoadingCurriculum] = useState(false);
+  const [curriculumProgress, setCurriculumProgress] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [notice, setNotice] = useState("");
@@ -29,10 +30,15 @@ export default function InitialAssessment() {
 
   const consultCurriculum = async () => {
     if (!course || !subject) { setNotice("Selecciona primero el curso y la asignatura."); return; }
-    setLoadingCurriculum(true); setNotice(""); setCurriculum(null); setSelected([]);
-    try { const response = await fetch("/api/curriculum", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ course, subject }) }); const body = await bodyOf(response); if (!response.ok) throw new Error(body.error); setCurriculum(body); setSelected(body.competencies.map((item: Competency) => item.code)); }
+    setLoadingCurriculum(true); setCurriculumProgress(4); setNotice(""); setCurriculum(null); setSelected([]);
+    const timer = window.setInterval(() => setCurriculumProgress((value) => Math.min(94, value + (value < 45 ? 7 : value < 75 ? 4 : 2))), 550);
+    try {
+      const response = await fetch("/api/curriculum-v2", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ course, subject }) });
+      const body = await bodyOf(response); if (!response.ok) throw new Error(body.error);
+      setCurriculumProgress(100); setCurriculum(body); setSelected(body.competencies.map((item: Competency) => item.code));
+    }
     catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo consultar el currículo."); }
-    finally { setLoadingCurriculum(false); }
+    finally { window.clearInterval(timer); setLoadingCurriculum(false); }
   };
 
   const upload = async (jobId: string, file: File, category: string) => {
@@ -57,6 +63,7 @@ export default function InitialAssessment() {
 
   return <section className="initial-assessment workspace"><div className="assessment-heading"><span className="section-kicker violet-ink">EVALUACIÓN INICIAL COMPETENCIAL</span><h1>Conoce el punto de partida de tu alumnado</h1><p>Selecciona curso y materia. La plataforma consulta las competencias específicas oficiales de Andalucía y prepara pruebas, observaciones y rúbricas listas para aplicar.</p></div><div className="assessment-layout"><div className="assessment-form">
     <section className="assessment-step"><span>01 · CURRÍCULO OFICIAL</span><h2>Curso y asignatura</h2><div className="assessment-fields"><label>Curso<select value={course} onChange={(event) => { setCourse(event.target.value); setSubject(""); setCurriculum(null); }}><option value="">Selecciona el curso</option>{courses.map((item) => <option key={item}>{item}</option>)}</select></label><label>Asignatura<select value={subject} disabled={!course} onChange={(event) => { setSubject(event.target.value); setCurriculum(null); }}><option value="">Selecciona la asignatura</option>{subjects.map((item) => <option key={item}>{item}</option>)}</select></label></div><button type="button" className="assessment-consult" disabled={loadingCurriculum || !course || !subject} onClick={consultCurriculum}>{loadingCurriculum ? "Consultando normativa oficial…" : "Obtener competencias específicas"}</button>
+    {loadingCurriculum && <div className="curriculum-progress" role="status"><span>Consultando normativa oficial</span><strong>{curriculumProgress}%</strong><i aria-hidden="true"><b style={{ width: `${curriculumProgress}%` }} /></i></div>}
     {curriculum && <div className="competency-picker"><header><div><strong>Competencias encontradas</strong><small>{curriculum.sourceTitle}</small></div><span>{selected.length} seleccionadas</span></header><div className="competency-actions"><button type="button" onClick={() => setSelected(curriculum.competencies.map((item) => item.code))}>Seleccionar todas</button><button type="button" onClick={() => setSelected([])}>Limpiar</button><a href={curriculum.sourceUrl} target="_blank" rel="noreferrer">Ver fuente oficial ↗</a></div>{curriculum.competencies.map((item) => <label key={item.code} className={selected.includes(item.code) ? "selected" : ""}><input type="checkbox" checked={selected.includes(item.code)} onChange={() => setSelected((current) => current.includes(item.code) ? current.filter((code) => code !== item.code) : [...current, item.code])} /><b>{item.code}</b><span>{item.text}</span></label>)}</div>}</section>
     <section className="assessment-step"><span>02 · APLICACIÓN</span><h2>Grupo o evaluación individual</h2><div className="assessment-fields"><label>Alumno o alumna <em>Opcional</em><input value={studentName} onChange={(event) => setStudentName(event.target.value)} placeholder="Déjalo vacío para el grupo clase" /></label><label>Docente <em>Opcional</em><input value={teacherName} onChange={(event) => setTeacherName(event.target.value)} placeholder="Nombre del docente" /></label></div><div className={`assessment-upload ${files.length ? "has-files" : ""}`}><input ref={input} type="file" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={(event) => { setFiles([...files, ...Array.from(event.target.files || [])]); event.target.value = ""; }} /><div><b>Dictamen, informe, ACI o adaptación</b><p>Opcional. Se utilizará para ajustar el acceso, los apoyos y la forma de responder, sin mostrar datos sensibles.</p></div><button type="button" onClick={() => input.current?.click()}>Seleccionar archivos</button>{files.map((file, index) => <span key={`${file.name}-${index}`}>{file.name}<button type="button" aria-label={`Eliminar ${file.name}`} onClick={() => setFiles(files.filter((_, item) => item !== index))}>×</button></span>)}</div></section>
     {notice && <div className="success-note" role="status">{notice}</div>}<button type="button" className="primary assessment-generate" disabled={processing || !curriculum || !selected.length} onClick={generate}>{processing ? `Creando documento… ${progress}%` : "Generar pruebas y rúbricas ✦"}</button>

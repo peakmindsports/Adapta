@@ -8,7 +8,7 @@ type Block = { type: "heading" | "bullet" | "checkbox" | "number" | "paragraph" 
 type SourceImage = { bytes: Uint8Array; width: number; height: number; type: "jpg" | "png" };
 type CoverDetails = { subject?: string | null; student?: string | null; course?: string | null; academicYear?: string | null; audience?: "all" | "student" | "teacher" };
 
-function generatedFallbackCover(): SourceImage {
+export function generatedFallbackCover(): SourceImage {
   const width = 900; const height = 560; const rgba = new Uint8Array(width * height * 4);
   for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
     const offset = (y * width + x) * 4; let color = [246, 242, 231];
@@ -118,7 +118,14 @@ function audienceSections(markdown: string) {
   const annex = markdown.match(/^# Anexo exclusivo para el profesorado\s*$/im);
   if (annex?.index !== undefined) return { student: markdown.slice(0, annex.index).trim(), teacher: markdown.slice(annex.index).trim() };
   const units = [...markdown.matchAll(/^# Unidad\s+(\d+)\s*:\s*(.+)$/gim)];
-  if (!units.length) return { student: markdown, teacher: "" };
+  if (!units.length) {
+    const start = markdown.search(/<!--\s*INICIO_DOCENTE\s*-->/i); const end = markdown.search(/<!--\s*FIN_DOCENTE\s*-->/i);
+    if (start < 0) return { student: markdown.replace(/<!--\s*(?:INICIO|FIN)_DOCENTE\s*-->/gi, "").trim(), teacher: "" };
+    const markerLength = markdown.slice(start).match(/^<!--\s*INICIO_DOCENTE\s*-->/i)?.[0].length || 0;
+    const student = `${markdown.slice(0, start)}\n\n${end >= 0 ? markdown.slice(end).replace(/^<!--\s*FIN_DOCENTE\s*-->/i, "") : ""}`.trim();
+    const teacherBody = markdown.slice(start + markerLength, end >= 0 ? end : markdown.length).replace(/<!--\s*(?:INICIO|FIN)_DOCENTE\s*-->/gi, "").trim();
+    return { student, teacher: teacherBody ? `# Guia exclusiva para el profesorado\n\n${teacherBody}` : "" };
+  }
   const preamble = markdown.slice(0, units[0].index).trim(); const studentUnits: string[] = []; const teacherUnits: string[] = [];
   units.forEach((unit, index) => {
     const chapter = markdown.slice(unit.index, units[index + 1]?.index ?? markdown.length).replace(/^\s*---\s*$/gm, "").trim();
@@ -186,7 +193,7 @@ function wrapText(text: string, maxWidth: number, size: number, font: { widthOfT
   if (current) lines.push(current); return lines.length ? lines : [""];
 }
 
-async function makePdf(title: string, markdown: string, images: Array<SourceImage | null>, cover: CoverDetails, coverImage: SourceImage, includeActivityMap = false) {
+export async function makePdf(title: string, markdown: string, images: Array<SourceImage | null>, cover: CoverDetails, coverImage: SourceImage, includeActivityMap = false) {
   const teacherCover = cover.audience === "teacher";
   const pdf = await PDFDocument.create(); const regular = await pdf.embedFont(StandardFonts.Helvetica); const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const pageSize: [number, number] = [595.28, 841.89]; const margin = 54; let page = pdf.addPage(pageSize); let y = pageSize[1] - margin;
@@ -203,7 +210,7 @@ async function makePdf(title: string, markdown: string, images: Array<SourceImag
   const coverEmbedded = coverImage.type === "png" ? await pdf.embedPng(coverImage.bytes) : await pdf.embedJpg(coverImage.bytes); const coverScale = Math.min(470 / coverEmbedded.width, 405 / coverEmbedded.height); const coverWidth = coverEmbedded.width * coverScale; const coverHeight = coverEmbedded.height * coverScale; page.drawRectangle({ x: (pageSize[0] - coverWidth) / 2 - 7, y: 222 - 7, width: coverWidth + 14, height: coverHeight + 14, color: rgb(1, 1, 1), borderColor: rgb(.82, .73, .59), borderWidth: 1 }); page.drawImage(coverEmbedded, { x: (pageSize[0] - coverWidth) / 2, y: 222, width: coverWidth, height: coverHeight });
   page.drawRectangle({ x: 42, y: 65, width: 511, height: 112, color: rgb(.93, .97, .95) }); page.drawRectangle({ x: 42, y: 65, width: 7, height: 112, color: rgb(.15, .5, .57) }); page.drawText(pdfSafe(cover.student || title), { x: 65, y: 128, size: 15, font: bold, color: rgb(.09, .17, .19), maxWidth: 460 }); page.drawText(pdfSafe([cover.course, cover.academicYear].filter(Boolean).join("  ·  ")), { x: 65, y: 96, size: 10, font: regular, color: rgb(.33, .44, .46) });
   addPage(); draw(title, 24, true, rgb(0.94, 0.34, 0.25), 0, 7); draw("Recurso adaptado", 12, true, rgb(0.15, 0.5, 0.57), 0, 22);
-  let firstHeading = true; let imageIndex = 0; const activityLocations: Array<{ code: string; title: string; page: number }> = [];
+  let firstHeading = true; let imageIndex = 0; let previousBlockType: Block["type"] | "" = ""; const activityLocations: Array<{ code: string; title: string; page: number }> = [];
   for (const block of parseMarkdown(markdown)) {
     if (block.type === "break") { if (y < pageSize[1] - margin - 20) addPage(); continue; }
     if (block.type === "image") {
@@ -220,11 +227,13 @@ async function makePdf(title: string, markdown: string, images: Array<SourceImag
     } else if (block.type === "checkbox") {
       if (y < margin + 35) addPage(); page.drawRectangle({ x: margin + 8, y: y - 2, width: 11, height: 11, borderColor: rgb(0.15, 0.5, 0.57), borderWidth: 1.5 }); draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 28, 7);
     } else if (block.type === "tableRow") {
+      if (previousBlockType !== "tableRow" && y < 430) addPage();
       const cells = block.cells?.length ? block.cells : [block.text]; const rubricHeader = cells.some((cell) => /^(Excelente|Bien|En proceso|Necesita apoyo|Todavía no|Observaciones)/i.test(cell)); const tableWidth = pageSize[0] - margin * 2; const columnWidth = tableWidth / cells.length; const cellLines = cells.map((cell) => wrapText(cell, columnWidth - 12, cells.length >= 5 ? 7.1 : 8.2, regular)); const lineHeight = cells.length >= 5 ? 9.4 : 11; const rowHeight = Math.max(30, Math.max(...cellLines.map((lines) => lines.length)) * lineHeight + 14); if (y - rowHeight < margin + 28) addPage(); const rowTop = y; cells.forEach((cell, cellIndex) => { const cellX = margin + cellIndex * columnWidth; const fill = cellIndex === 0 ? rgb(.86, .9, .97) : cellIndex === 1 && cells.length >= 5 ? rgb(.82, .93, .75) : cellIndex === 2 && cells.length >= 5 ? rgb(1, .91, .66) : cellIndex === 3 && cells.length >= 5 ? rgb(.98, .78, .57) : cellIndex === 4 && cells.length >= 5 ? rgb(.96, .49, .58) : rgb(.98, .99, .98); page.drawRectangle({ x: cellX, y: rowTop - rowHeight, width: columnWidth, height: rowHeight, color: fill, borderColor: rgb(.76, .79, .78), borderWidth: .65 }); cellLines[cellIndex].forEach((line, lineIndex) => page.drawText(line, { x: cellX + 6, y: rowTop - 12 - lineIndex * lineHeight, size: cells.length >= 5 ? 7.1 : 8.2, font: cellIndex === 0 || rubricHeader ? bold : regular, color: rgb(.12, .17, .18) })); }); y -= rowHeight;
-    } else if (block.type === "heading") { if (!firstHeading && block.level === 1 && y < pageSize[1] - margin - 80) addPage(); firstHeading = false; const activityHeading = /actividad|producto final|demuestro|repaso|juego|taller/i.test(block.text); if (activityHeading && y < pageSize[1] - margin - 30) y -= 26; else y -= block.level === 1 ? 10 : 4; if (activityHeading) { if (y < margin + 90) addPage(); page.drawRectangle({ x: margin - 8, y: y - 8, width: pageSize[0] - margin * 2 + 16, height: 30, color: rgb(0.99, 0.9, 0.84), borderColor: rgb(0.9, 0.62, 0.52), borderWidth: .8 }); } const activityCode = block.text.match(/\[(ACT-[A-Z0-9-]+)\]/i)?.[1]?.toUpperCase(); if (activityCode && !activityLocations.some((item) => item.code === activityCode)) activityLocations.push({ code: activityCode, title: block.text.replace(/\[ACT-[A-Z0-9-]+\]\s*/i, "").trim(), page: pdf.getPageCount() }); draw(block.text, block.level === 1 ? 18 : block.level === 2 ? 15 : 12, true, block.level === 1 ? rgb(0.15, 0.5, 0.57) : rgb(0.09, 0.17, 0.19), 0, activityHeading ? 12 : 8); }
+    } else if (block.type === "heading") { if (!firstHeading && block.level === 1 && y < pageSize[1] - margin - 80) addPage(); if (/brica anal|lista de observaci/i.test(block.text) && y < 500) addPage(); firstHeading = false; const activityHeading = /actividad|producto final|demuestro|repaso|juego|taller/i.test(block.text); if (activityHeading && y < pageSize[1] - margin - 30) y -= 26; else y -= block.level === 1 ? 10 : 4; if (activityHeading) { if (y < margin + 90) addPage(); page.drawRectangle({ x: margin - 8, y: y - 8, width: pageSize[0] - margin * 2 + 16, height: 30, color: rgb(0.99, 0.9, 0.84), borderColor: rgb(0.9, 0.62, 0.52), borderWidth: .8 }); } const activityCode = block.text.match(/\[(ACT-[A-Z0-9-]+)\]/i)?.[1]?.toUpperCase(); if (activityCode && !activityLocations.some((item) => item.code === activityCode)) activityLocations.push({ code: activityCode, title: block.text.replace(/\[ACT-[A-Z0-9-]+\]\s*/i, "").trim(), page: pdf.getPageCount() }); draw(block.text, block.level === 1 ? 18 : block.level === 2 ? 15 : 12, true, block.level === 1 ? rgb(0.15, 0.5, 0.57) : rgb(0.09, 0.17, 0.19), 0, activityHeading ? 12 : 8); }
     else if (block.type === "bullet") draw(`- ${block.text}`, 10.5, false, rgb(0.18, 0.25, 0.26), 12, 4);
     else if (block.type === "number") { y -= 7; draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 12, 13); }
     else draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 0, 12);
+    previousBlockType = block.type;
   }
   if (includeActivityMap && activityLocations.length) {
     addPage(); draw("Mapa de localización de actividades evaluables", 18, true, rgb(0.15, 0.5, 0.57), 0, 10); draw("Las páginas se corresponden con la numeración real de este PDF. Utiliza el código en las rúbricas, pruebas y matrices de trazabilidad.", 10.5, false, rgb(0.18, 0.25, 0.26), 0, 16);
