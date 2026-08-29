@@ -64,6 +64,35 @@ function isTemporaryOpenAIError(status: number, message: string) {
     || /unknown error while validating file ownership|validating file ownership|file.*(?:not (?:yet )?(?:available|ready|found)|still (?:processing|being processed))|try again/i.test(message);
 }
 
+const initialAssessmentPrompt = (job: Record<string, unknown>, notes: string) => `Eres especialista en evaluación competencial, atención a la diversidad y currículo de Andalucía. Crea un único documento de EVALUACIÓN INICIAL para ${job.current_course}, área o materia ${job.subject}. Usa literalmente las competencias específicas oficiales incluidas en las indicaciones docentes y no añadas otras. ${notes}
+
+MARCO OBLIGATORIO: aplica la Orden de 30 de mayo de 2023 correspondiente a Primaria o ESO en Andalucía. La evaluación inicial es competencial, orientadora y sirve para tomar decisiones; nunca puede consistir exclusivamente en una prueba objetiva. Combina tareas, observación, diálogo, producciones, desempeño práctico y, cuando resulte adecuado, preguntas escritas. No conviertas los resultados en calificaciones numéricas.
+
+Crea pruebas independientes pero reunidas en el mismo documento. Cada prueba debe indicar con claridad si evalúa una sola competencia o varias simultáneamente. Asegura que el conjunto cubra todas las competencias seleccionadas sin redundancias innecesarias.
+
+ESTRUCTURA OBLIGATORIA:
+# Evaluación inicial · ${job.subject} · ${job.current_course}
+## Finalidad y orientaciones de aplicación
+Explica brevemente que deben combinarse las pruebas con observación diaria e información del curso anterior.
+## Mapa de cobertura
+Tabla: prueba → competencias evaluadas → evidencia → instrumento → modalidad (individual/pareja/grupo) → tiempo estimado.
+## Cuaderno del alumnado
+Para cada prueba incluye: título, competencias evaluadas, materiales, instrucciones accesibles, tareas completas listas para imprimir y espacio visible para responder. Alterna al menos cuatro tipos de evidencia y evita preguntas memorísticas aisladas.
+<!-- INICIO_DOCENTE -->
+# Guía exclusiva para el profesorado
+Para CADA prueba incluye: propósito, condiciones de aplicación, indicadores observables, respuestas esperadas o ejemplos de desempeño, lista de observación y una rúbrica analítica directamente utilizable. Todas las rúbricas usarán exactamente tres niveles: «No conseguido», «En proceso» y «Conseguido». Escribe una descripción observable, específica y diferente para cada nivel; no uses solo adjetivos genéricos.
+## Registro individual de resultados
+Tabla por estudiante y competencia con: evidencia observada, nivel, apoyo utilizado, observaciones y decisión pedagógica inicial.
+## Síntesis del grupo y decisiones
+Incluye un registro que permita detectar aprendizajes prioritarios, apoyos, agrupamientos flexibles y ajustes metodológicos.
+## Trazabilidad curricular
+Tabla completa: competencia específica → prueba/tarea → indicador → evidencia → rúbrica.
+<!-- FIN_DOCENTE -->
+
+ADAPTACIÓN: si se adjunta un informe, dictamen, ACI o adaptación, úsalo solo para ajustar acceso, comunicación, tiempos, carga, formato, apoyos, modo de respuesta e instrumentos. Si contiene referentes curriculares individualizados, identifícalos en la guía docente y crea una versión accesible equivalente, sin exponer diagnóstico ni datos sensibles en el cuaderno del alumnado. No rebajes automáticamente el referente ni diagnostiques. Señala siempre que la decisión final corresponde al equipo docente y, cuando proceda, a orientación.
+
+Escribe en español claro, Markdown listo para convertir a PDF y Word, y material completo: no te limites a recomendar actividades o rúbricas.`;
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   await ensureSchema();
   const { id } = await context.params;
@@ -89,7 +118,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const projectPersonalContext = job.kind === "project_adaptation" && body.studentContext ? "\n\nPERFILES PEDAGÓGICOS APLICABLES AL PROYECTO (solo para tomar decisiones, nunca para copiarlos en la parte del alumnado):\n- Fortalezas, intereses y motivadores: " + (body.studentContext.strengths || "No indicado") + "\n- Situaciones observables y necesidades en el aula: " + (body.studentContext.classroomContext || "No indicado") + "\n- Contexto familiar relevante: " + (body.studentContext.familyContext || "No indicado") + "\n- Estrategias eficaces y situaciones a evitar: " + (body.studentContext.effectiveSupports || "No indicado") + "\nCada dato real debe cambiar de forma visible los apoyos, opciones, roles, tiempos, recursos y evaluación del proyecto. No inventes información cuando falte." : "";
     const isLearningResource = job.kind === "adaptation" || job.kind === "reinforcement";
     const resourcePrompt = job.kind === "reinforcement" ? reinforcementPrompt : adaptationPrompt;
-    const content: any[] = [{ type: "input_text", text: isLearningResource ? resourcePrompt(job, String(body.notes || "") + personalContext) + "\n\n" + manualInputContract + "\n\n" + qualityAssuranceContract + "\n\n" + evaluationAuditContract : projectPrompt(job, String(body.notes || "") + projectPersonalContext + adaptedProjectContext, body.theme || "", body.duration || "") + "\n\n" + manualInputContract + "\n\n" + qualityAssuranceContract + "\n\n" + criteriaMatrixContract + "\n\n" + evaluationAuditContract }];
+    const basePrompt = job.kind === "initial_assessment" ? initialAssessmentPrompt(job, String(body.notes || "")) : isLearningResource ? resourcePrompt(job, String(body.notes || "") + personalContext) + "\n\n" + manualInputContract + "\n\n" + qualityAssuranceContract + "\n\n" + evaluationAuditContract : projectPrompt(job, String(body.notes || "") + projectPersonalContext + adaptedProjectContext, body.theme || "", body.duration || "") + "\n\n" + manualInputContract + "\n\n" + qualityAssuranceContract + "\n\n" + criteriaMatrixContract + "\n\n" + evaluationAuditContract;
+    const content: any[] = [{ type: "input_text", text: basePrompt }];
     for (const row of fileRows.results) {
       let fileParts: ArrayBuffer[] = [];
       if (row.storage_key.startsWith("chunks:")) {
@@ -120,7 +150,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       for (let attempt = 0; attempt < 6; attempt++) {
         const response = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model, input: [{ role: "user", content: requestContent }], max_output_tokens: maxOutputTokens, store: false }) });
         const data = await response.json() as any;
-        if (response.ok) { await recordApiUsage(owner, job.kind === "reinforcement" ? "reinforcement" : job.kind === "adaptation" ? "adaptation" : "project", model, data); return extractText(data); }
+        if (response.ok) { await recordApiUsage(owner, job.kind === "reinforcement" ? "reinforcement" : job.kind === "adaptation" ? "adaptation" : job.kind === "initial_assessment" ? "initial_assessment" : "project", model, data); return extractText(data); }
         const message = data?.error?.message || "";
         if (!isTemporaryOpenAIError(response.status, message) || attempt === 5) throw new Error(message || "No se pudo completar una parte del libro.");
         const suggestedSeconds = Number(response.headers.get("retry-after")) || Number(message.match(/try again in ([\d.]+)s/i)?.[1]) || 15;
