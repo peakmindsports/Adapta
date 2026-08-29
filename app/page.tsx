@@ -314,15 +314,14 @@ useEffect(() => {
     const body = await responseBody(response); if (response.ok) setPublicEnabled(body.publicEnabled); else setAdminStatus(body.error); setAdminBusy("");
   };
   const toggleUserAccess = async (user: AdminUser) => {
+    setAdminBusy(user.email); const next = !Boolean(user.blocked);
+    const response = await fetch("/api/admin/users", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: user.email, blocked: next }) });
+    const body = await responseBody(response); if (response.ok) setAdminUsers((items) => items.map((item) => item.email === user.email ? { ...item, blocked: next ? 1 : 0 } : item)); else setAdminStatus(body.error); setAdminBusy("");
+  };
   const toggleFeatureVisibility = async (key: FeatureKey) => {
     setAdminBusy(key); setAdminStatus(""); const visible = !featureVisibility[key];
     const response = await fetch("/api/admin/visibility", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, visible }) });
     const body = await responseBody(response); if (response.ok) { setFeatureVisibility(body.featureVisibility); if (!visible && viewRef.current === key) { viewRef.current = "home"; setView("home"); } if (key === "manual" && !visible) setShowManual(false); if (key === "privacidad" && !visible) setShowPrivacy(false); } else setAdminStatus(body.error); setAdminBusy("");
-  };
-
-    setAdminBusy(user.email); const next = !Boolean(user.blocked);
-    const response = await fetch("/api/admin/users", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: user.email, blocked: next }) });
-    const body = await responseBody(response); if (response.ok) setAdminUsers((items) => items.map((item) => item.email === user.email ? { ...item, blocked: next ? 1 : 0 } : item)); else setAdminStatus(body.error); setAdminBusy("");
   };
   const deleteAdminUser = async (user: AdminUser) => {
     if (!window.confirm(`¿Eliminar definitivamente a ${user.email} del registro y borrar sus estadísticas de consumo? Su acceso quedará retirado.`)) return;
