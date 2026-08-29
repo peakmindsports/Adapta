@@ -20,7 +20,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (row.storage_key.startsWith("chunks:")) { const listed = await FILES.list({ prefix: row.storage_key.slice(7) }); for (const entry of [...listed.objects].sort((a, b) => a.key.localeCompare(b.key))) { const part = await FILES.get(entry.key); if (part) parts.push(await part.arrayBuffer()); } }
       else { const object = await FILES.get(row.storage_key); if (object) parts.push(await object.arrayBuffer()); }
       if (!parts.length) continue;
-      const form = new FormData(); form.append("purpose", "user_data"); form.append("expires_after", JSON.stringify({ anchor: "created_at", seconds: 86400 })); form.append("file", new File(parts, row.filename, { type: row.content_type }));
+      const form = new FormData(); form.append("purpose", "user_data"); form.append("file", new File(parts, row.filename, { type: row.content_type }));
       const response = await fetch("https://api.openai.com/v1/files", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, body: form }); const data = await response.json() as any;
       if (!response.ok || !data.id) throw new Error(data?.error?.message || `No se pudo analizar “${row.filename}”.`); uploadedIds.push(data.id);
     }

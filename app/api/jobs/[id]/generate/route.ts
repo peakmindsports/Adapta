@@ -130,7 +130,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (!fileParts.length) continue;
       const uploadForm = new FormData();
       uploadForm.append("purpose", "user_data");
-      uploadForm.append("expires_after", JSON.stringify({ anchor: "created_at", seconds: 86400 }));
       uploadForm.append("file", new File(fileParts, row.filename, { type: row.content_type }));
       const uploadedResponse = await fetch("https://api.openai.com/v1/files", { method: "POST", headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, body: uploadForm });
       const uploaded = await uploadedResponse.json() as any;
