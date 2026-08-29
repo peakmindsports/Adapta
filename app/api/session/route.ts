@@ -1,4 +1,5 @@
 import { ensureSchema, isSiteAdmin, ownerFrom, runtime } from "../_shared";
+import { readFeatureVisibility } from "../_visibility";
 
 function fullNameFrom(request: Request) {
   const value = request.headers.get("oai-authenticated-user-full-name");
@@ -22,5 +23,6 @@ export async function GET(request: Request) {
   }
   const visibility = await DB.prepare("SELECT model FROM user_settings WHERE owner_email = 'site-public-visibility'").first<{ model: string }>();
   const publicEnabled = visibility?.model !== "disabled";
-  return Response.json({ authenticated: Boolean(email) && !blocked, identified: Boolean(email), blocked, isAdmin: admin, email, displayName, publicEnabled });
+  const featureVisibility = await readFeatureVisibility();
+  return Response.json({ authenticated: Boolean(email) && !blocked, identified: Boolean(email), blocked, isAdmin: admin, email, displayName, publicEnabled, featureVisibility });
 }
