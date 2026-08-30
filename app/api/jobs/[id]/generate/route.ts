@@ -101,6 +101,21 @@ ADAPTACIÓN: si se adjunta un informe, dictamen, ACI o adaptación, úsalo solo 
 
 Escribe en español claro, Markdown listo para convertir a PDF y Word, y material completo: no te limites a recomendar actividades o rúbricas.`;
 
+const refusalPattern = /necesito que (?:adjuntes|facilites|pegues)|archivo no (?:está|esta) disponible|cuando lo facilites|no puedo (?:elaborar|garantizar|continuar)|falta(?: el)? (?:archivo|documento)|no se (?:ha )?(?:adjuntado|proporcionado)/i;
+function generatedResultIssue(result: string, profile: "initial_assessment" | "chapter" | "project") {
+  const clean = String(result || "").trim();
+  const words = clean.split(/\s+/).filter(Boolean).length;
+  if (!clean || refusalPattern.test(clean)) return "La respuesta solicitó archivos o información que ya se habían aportado.";
+  const minimum = profile === "chapter" ? 550 : profile === "initial_assessment" ? 1200 : 900;
+  if (words < minimum) return `El documento es anormalmente corto (${words} palabras; mínimo ${minimum}).`;
+  if (profile === "initial_assessment" && !/Cuaderno del alumnado/i.test(clean)) return "Falta el cuaderno del alumnado.";
+  if (profile === "initial_assessment" && !/Gu[ií]a exclusiva para el profesorado/i.test(clean)) return "Falta la guía del profesorado.";
+  if (profile === "initial_assessment" && !/R[uú]brica anal[ií]tica/i.test(clean)) return "Faltan las rúbricas analíticas.";
+  if (profile === "chapter" && !/Unidad\s+\d+/i.test(clean)) return "Falta la unidad completa.";
+  if (profile === "project" && (!/producto final/i.test(clean) || !/evaluaci[oó]n/i.test(clean))) return "Faltan el producto final o la evaluación.";
+  return "";
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   await ensureSchema();
   const { id } = await context.params;
@@ -113,7 +128,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const fileRows = await DB.prepare("SELECT filename, content_type, storage_key, category FROM job_files WHERE job_id = ? AND owner_email = ? ORDER BY created_at").bind(id, owner).all<Record<string, string>>();
   if (!fileRows.results.length) return jsonError("Añade al menos un documento antes de generar.");
   const isOrientationBank = String(job.student_name || "").startsWith("Banco del Departamento de Orientación");
-  if (job.status === "completed" && job.result) return Response.json({ result: job.result, recovered: true });
+  if (job.status === "completed" && job.result) { const profile = job.kind === "initial_assessment" ? "initial_assessment" : job.kind === "adaptation" || job.kind === "reinforcement" ? "chapter" : "project"; if (!generatedResultIssue(String(job.result), profile)) return Response.json({ result: job.result, recovered: true }); await DB.prepare("UPDATE jobs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?").bind("La generación anterior estaba incompleta y se regenerará.", Date.now(), id).run(); job.status = "failed"; }
   if (job.status === "generating" && Date.now() - Number(job.updated_at || 0) < 45 * 60 * 1000) return jsonError("La generación sigue activa. Espera mientras termina; no es necesario volver a subir los documentos.", 409);
   const quotaLimit = isOrientationBank ? 30 : 3;
   if (job.status !== "failed") { const quota = await consumeDailyQuota(owner, "generation", quotaLimit); if (!quota.allowed) return jsonError(isOrientationBank ? "Has alcanzado el límite diario de 30 recursos multinivel. Podrás continuar mañana." : "Has alcanzado el límite diario de 3 generaciones durante la fase pública inicial. Podrás volver a generar mañana.", 429); }
@@ -136,6 +151,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         for (const entry of objects) { const part = await FILES.get(entry.key); if (part) fileParts.push(await part.arrayBuffer()); }
       } else { const object = await FILES.get(row.storage_key); if (object) fileParts = [await object.arrayBuffer()]; }
       if (!fileParts.length) continue;
+      if (job.kind === "initial_assessment" && row.category === "criterios" && row.content_type.startsWith("text/")) {
+        const curriculumText = await new Blob(fileParts).text();
+        content[0].text += `\n\nCURRÍCULO OFICIAL INCORPORADO DIRECTAMENTE (está disponible; no solicites que se adjunte de nuevo):\n${curriculumText}`;
+        continue;
+      }
       const uploadForm = new FormData();
       uploadForm.append("purpose", "user_data");
       uploadForm.append("file", new File(fileParts, row.filename, { type: row.content_type }));
@@ -167,6 +187,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
       throw new Error("No se pudo completar una parte del libro tras varios reintentos.");
     };
+    const callValidatedModel = async (requestContent: any[], maxOutputTokens: number, profile: "initial_assessment" | "chapter" | "project") => {
+      let lastIssue = "";
+      for (let qualityAttempt = 0; qualityAttempt < 2; qualityAttempt += 1) {
+        const correctedContent = qualityAttempt === 0 ? requestContent : requestContent.map((item, index) => index === 0 && item.type === "input_text" ? { ...item, text: item.text + `\n\nCORRECCIÓN OBLIGATORIA: la respuesta anterior no era entregable: ${lastIssue} Todos los documentos y datos necesarios ya están disponibles. No pidas archivos, no expliques lo que harías y no devuelvas un esquema. Redacta ahora el documento completo, autosuficiente, imprimible y listo para usar.` } : item);
+        const candidate = await callModel(correctedContent, maxOutputTokens);
+        lastIssue = generatedResultIssue(candidate, profile);
+        if (!lastIssue) return candidate;
+      }
+      throw new Error(`La generación no superó el control de integridad: ${lastIssue} Inténtalo de nuevo; no se guardó ningún documento incompleto.`);
+    };
+    if (job.kind === "initial_assessment") {
+      const result = await callValidatedModel(content, 14000, "initial_assessment");
+      await DB.prepare("UPDATE jobs SET status = 'completed', result = ?, updated_at = ? WHERE id = ?").bind(result, Date.now(), id).run();
+      return Response.json({ result });
+    }
     if (job.kind === "adaptation" || job.kind === "reinforcement") {
       const units = preparedFiles.filter((file) => file.category === "unidades");
       const contextFiles = preparedFiles.filter((file) => file.category !== "unidades");
@@ -202,7 +237,7 @@ No inventes, no selecciones una muestra y no mezcles las X de columnas contiguas
 ## Registro individual de evaluación (tabla lista para cumplimentar con resultado, peso, aportación a la nota, observación y siguiente paso)
 ## Auditoría final de cobertura (todos los criterios y saberes seleccionados; evidencia e instrumento; seleccionados, cubiertos y pendientes = 0)
 ## Guía docente (objetivos, criterios, saberes, indicadores, evidencias, apoyos y registros de evaluación)\n${job.kind === "reinforcement" ? "## Seguimiento del PRA (situación inicial, medidas aplicadas, calendario, revisión trimestral, información a la familia y decisión de continuidad/modificación/finalización)" : ""}\n<!-- FIN_DOCENTE -->\n\nRespeta literalmente los marcadores INICIO_DOCENTE y FIN_DOCENTE. Antes de INICIO_DOCENTE solo puede aparecer material entregable al alumnado; no incluyas respuestas, solucionarios, rúbricas ni registros docentes. Escribe todos los instrumentos completos y directamente imprimibles; no te limites a recomendarlos. Cada indicador e instrumento debe derivar de los criterios seleccionados aportados por el equipo docente. Si se aportó una selección de criterios, está prohibido escribir «Criterio no disponible»: recupera su código y redacción literal del contexto común y vincúlalo a esta unidad. Si realmente no existe selección curricular, redacta indicadores observables útiles y escribe únicamente en el inventario docente «Referencia curricular pendiente de confirmación docente», sin repetirlo en cada indicador. Escribe material directamente utilizable. No incluyas síntesis pedagógica al principio ni repitas datos administrativos en cada página. Usa Markdown, tablas solo cuando ayuden de verdad y marcadores [IMAGEN: ...] donde la maquetación deba reutilizar imágenes del PDF original.`;
-          chapters[index] = await callModel([{ type: "input_text", text: prompt }, { type: "input_file", file_id: unit.id }], 8500);
+          chapters[index] = await callValidatedModel([{ type: "input_text", text: prompt }, { type: "input_file", file_id: unit.id }], 10000, "chapter");
           await DB.prepare("UPDATE jobs SET updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
         }
       }));
@@ -218,6 +253,7 @@ No inventes, no selecciones una muestra y no mezcles las X de columnas contiguas
       });
       const teacherAnnex = teacherChapters.length ? `\n\n---\n\n# Anexo exclusivo para el profesorado\n\nEste bloque reúne los instrumentos de evaluación, registros, pruebas y solucionarios. No forma parte del material entregable al alumnado.\n\n${teacherChapters.join("\n\n---\n\n")}` : "";
       const result = bookTitle + studentChapters.join("\n\n---\n\n") + teacherAnnex;
+      const assembledIssue = generatedResultIssue(result, "chapter"); if (assembledIssue) throw new Error(`El recurso completo no superó el control de integridad: ${assembledIssue}`);
       await DB.prepare("UPDATE jobs SET title = ?, status = 'completed', result = ?, updated_at = ? WHERE id = ?").bind(job.kind === "reinforcement" ? `PRA · ${job.student_name}` : `Recurso adaptado · ${job.student_name}`, result, Date.now(), id).run();
       return Response.json({ result });
     }
@@ -226,8 +262,7 @@ No inventes, no selecciones una muestra y no mezcles las X de columnas contiguas
       summaries.push(await callModel([{ type: "input_text", text: `Analiza exclusivamente “${file.filename}”, clasificado como ${file.category}. Resume de forma compacta estructura, UDI, contenidos, competencias, criterios, metodología, actividades, recursos y elementos visuales. Si contiene una selección curricular, conserva exactamente todos los criterios y saberes seleccionados, con sus códigos, descriptores, unidad y asignatura; no omitas ninguno. Este resumen se integrará después en un proyecto interdisciplinar.` }, { type: "input_file", file_id: file.id }], file.category.includes("criteria") || file.category.includes("criterios") ? 3500 : 2000));
     }
     const synthesis = `${content[0].text}\n\nANÁLISIS INDIVIDUAL DE LOS DOCUMENTOS:\n${summaries.map((summary, index) => `\n--- ${preparedFiles[index].category.toUpperCase()} · ${preparedFiles[index].filename} ---\n${summary}`).join("\n")}`.slice(0, 300000);
-    const result = await callModel([{ type: "input_text", text: synthesis }], 11000);
-    if (!result) throw new Error("La IA no devolvió contenido utilizable.");
+    const result = await callValidatedModel([{ type: "input_text", text: synthesis }], 14000, "project");
     await DB.prepare("UPDATE jobs SET status = 'completed', result = ?, updated_at = ? WHERE id = ?").bind(result, Date.now(), id).run();
     return Response.json({ result });
   } catch (error) {

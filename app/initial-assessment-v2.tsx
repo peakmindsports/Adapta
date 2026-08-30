@@ -191,7 +191,7 @@ export default function InitialAssessment() {
         await upload(created.job.id, cf, "criterios");
         for (const file of files)
           await upload(created.job.id, file, "dictamen");
-        const notes = `Evaluación independiente de ${c.subject}. Incluye todas las competencias, pruebas y rúbricas con No adquirido, En proceso y Adquirido. ${files.length ? "Aplica ajustes equivalentes a partir de la documentación individual." : "Prueba común para el grupo."}`;
+        const notes = `Evaluación independiente de ${c.subject}. Incluye todas las competencias, pruebas y rúbricas con No adquirido, En proceso y Adquirido. ${files.length ? "Aplica ajustes equivalentes a partir de la documentación individual." : "Prueba común para el grupo."}\n\nCOMPETENCIAS ESPECÍFICAS OFICIALES YA DISPONIBLES (no solicites archivos ni información adicional):\n${c.competencies.map((competency) => `${competency.code}. ${competency.text}`).join("\n\n")}`;
         const gr = await fetch(`/api/jobs/${created.job.id}/generate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

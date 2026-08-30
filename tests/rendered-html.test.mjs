@@ -202,3 +202,5 @@ test("shows Manu Galán Marín beside the brand on tablets and phones", async ()
   assert.match(css, /\.brand em\{display:block;font-size:7px;line-height:1\.15;white-space:nowrap\}/);
   assert.match(css, /@media\(max-width:420px\)\{\.site-header\{padding-inline:12px\}/);
 });
+
+test("rejects incomplete generations across every workflow", async () => { const generation = await readProjectFile("app/api/jobs/[id]/generate/route.ts"); assert.match(generation, /generatedResultIssue/); assert.match(generation, /callValidatedModel/); assert.match(generation, /qualityAttempt < 2/); assert.match(generation, /initial_assessment/); assert.match(generation, /chapter/); assert.match(generation, /project/); assert.match(generation, /no se guardó ningún documento incompleto/); assert.match(generation, /CURRÍCULO OFICIAL INCORPORADO DIRECTAMENTE/); });
