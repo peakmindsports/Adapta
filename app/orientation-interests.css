@@ -1,0 +1,38 @@
+.orientation-interest-field {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #d8cdec;
+  border-radius: 12px;
+  background: #f7f3fc;
+}
+
+.orientation-interest-field label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #513c7b;
+  font-weight: 800;
+}
+
+.orientation-interest-field label span {
+  border-radius: 20px;
+  background: #e9e0f5;
+  padding: 3px 8px;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.orientation-interest-field textarea {
+  width: 100%;
+  min-height: 96px;
+  margin-top: 9px;
+  resize: vertical;
+}
+
+.orientation-interest-field small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
