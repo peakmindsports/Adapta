@@ -5,7 +5,8 @@ import { useRef, useState } from "react";
 type Competency = { code: string; text: string };
 type Curriculum = { sourceTitle: string; sourceUrl: string; competencies: Competency[] };
 
-const courses = ["1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO", "3º de ESO", "4º de ESO"];
+const courses = ["3 años de Infantil", "4 años de Infantil", "5 años de Infantil", "1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO", "3º de ESO", "4º de ESO"];
+const infantSubjects = ["Crecimiento en Armonía", "Descubrimiento y Exploración del Entorno", "Comunicación y Representación de la Realidad"];
 const primarySubjects = ["Lengua Castellana y Literatura", "Matemáticas", "Conocimiento del Medio Natural, Social y Cultural", "Primera Lengua Extranjera", "Educación Artística", "Educación Física", "Educación en Valores Cívicos y Éticos"];
 const esoSubjects = ["Lengua Castellana y Literatura", "Matemáticas", "Primera Lengua Extranjera", "Geografía e Historia", "Biología y Geología", "Física y Química", "Tecnología y Digitalización", "Educación Física", "Música", "Educación Plástica, Visual y Audiovisual", "Educación en Valores Cívicos y Éticos"];
 
@@ -26,7 +27,7 @@ export default function InitialAssessment() {
   const [progress, setProgress] = useState(0);
   const [notice, setNotice] = useState("");
   const [result, setResult] = useState<{ id: string; text: string } | null>(null);
-  const subjects = course.includes("ESO") ? esoSubjects : primarySubjects;
+  const subjects = course.includes("Infantil") ? infantSubjects : course.includes("ESO") ? esoSubjects : primarySubjects;
 
   const consultCurriculum = async () => {
     if (!course || !subject) { setNotice("Selecciona primero el curso y la asignatura."); return; }

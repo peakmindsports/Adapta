@@ -15,6 +15,9 @@ type Res = {
   subject: string;
 };
 const courses = [
+  "3 años de Infantil",
+  "4 años de Infantil",
+  "5 años de Infantil",
   "1º de Primaria",
   "2º de Primaria",
   "3º de Primaria",
@@ -33,6 +36,11 @@ const primary = [
   "Primera Lengua Extranjera",
   "Educación Artística",
   "Educación Física",
+];
+const infant = [
+  "Crecimiento en Armonía",
+  "Descubrimiento y Exploración del Entorno",
+  "Comunicación y Representación de la Realidad",
 ];
 const secondary = [
   "Lengua Castellana y Literatura",
@@ -72,11 +80,13 @@ export default function InitialAssessment() {
     [notice, setNotice] = useState(""),
     [results, setResults] = useState<Res[]>([]),
     [report, setReport] = useState<any>(null);
-  const subjects = course.includes("ESO")
-    ? secondary
-    : course.startsWith("6º")
-      ? [...primary, "Educación en Valores Cívicos y Éticos"]
-      : primary;
+  const subjects = course.includes("Infantil")
+    ? infant
+    : course.includes("ESO")
+      ? secondary
+      : course.startsWith("6º")
+        ? [...primary, "Educación en Valores Cívicos y Éticos"]
+        : primary;
   const toggle = (s: string) => {
     setChosen((x) => (x.includes(s) ? x.filter((v) => v !== s) : [...x, s]));
     setCurricula([]);
@@ -356,24 +366,34 @@ export default function InitialAssessment() {
                   ))}
                 </details>
               ))}
-              {curricula.length > 0 && curricula.length === chosen.length && (
-                <div className="excel-ready">
-                  <div>
-                    <strong>Excel listo para cumplimentar</strong>
-                    <p>
-                      Añade el alumnado en la columna A y selecciona el nivel
-                      alcanzado en cada competencia.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="excel-download"
-                    onClick={excel}
-                  >
-                    Descargar Excel para cumplimentar
-                  </button>
+              <div
+                className={`excel-ready ${curricula.length > 0 && curricula.length === chosen.length ? "" : "is-disabled"}`}
+              >
+                <div>
+                  <strong>
+                    {curricula.length > 0 && curricula.length === chosen.length
+                      ? "Excel listo para cumplimentar"
+                      : "Excel de registro de la evaluación inicial"}
+                  </strong>
+                  <p>
+                    {curricula.length > 0 && curricula.length === chosen.length
+                      ? "Añade el alumnado en la columna A y selecciona el nivel alcanzado en cada competencia."
+                      : "Selecciona curso y asignaturas y pulsa Obtener competencias específicas. Entonces podrás descargar aquí el Excel."}
+                  </p>
                 </div>
-              )}
+                <button
+                  type="button"
+                  className="excel-download"
+                  disabled={
+                    busy ||
+                    !curricula.length ||
+                    curricula.length !== chosen.length
+                  }
+                  onClick={excel}
+                >
+                  Descargar Excel inicial
+                </button>
+              </div>
             </section>
             <section className="assessment-step">
               <span>02 · APLICACIÓN</span>

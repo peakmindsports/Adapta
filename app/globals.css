@@ -179,3 +179,11 @@
 @media(max-width:1180px){.admin-visibility-dock{left:18px;top:82px;width:370px}.admin-panel-wide{max-width:calc(100vw - 410px)}}
 @media(max-width:800px){.admin-visibility-dock{position:fixed;inset:66px 12px auto;width:auto;max-height:42vh}.admin-feature-visibility{padding:16px;border-radius:16px}.admin-feature-visibility>header p,.admin-feature-visibility article small,.admin-visibility-note{display:none}.admin-feature-visibility>header strong{font-size:18px}.admin-feature-visibility article{padding:9px 0}.admin-panel-wide{max-width:none;padding-top:46vh}}
 .curriculum-progress{margin-top:12px;display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;color:#654491;font-size:12px;font-weight:800}.curriculum-progress>i{grid-column:1/-1;height:8px;overflow:hidden;border-radius:999px;background:#ebe1f8}.curriculum-progress>i>b{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#7651a8,#a47ad2);transition:width .45s ease}
+
+/* Ajustes de escala para mantener la portada y Evaluación inicial alineadas con el resto */
+.assessment-heading h1{font-size:clamp(36px,4.2vw,56px);line-height:1.06;letter-spacing:-1.5px}
+.assessment-heading p{font-size:16px;line-height:1.55}
+.hero-actions{flex-wrap:wrap;max-width:680px;gap:10px;margin-top:28px}
+.hero-actions>button{padding:11px 14px;font-size:12.5px;line-height:1.2;box-shadow:0 3px 0 color-mix(in srgb,currentColor 35%,transparent)}
+.hero-actions>button span{margin-left:8px}
+@media(max-width:1250px) and (min-width:901px){.hero-copy{max-width:670px}.hero-actions{max-width:610px}.hero-actions>button{padding:10px 12px;font-size:12px}}

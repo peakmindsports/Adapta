@@ -319,3 +319,33 @@
     min-width: 0;
   }
 }
+
+/* Escala tipográfica coherente y descarga siempre localizable */
+.assessment-mode button {
+  padding: 9px 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  line-height: 1.25;
+}
+.assessment-consult,
+.assessment-generate,
+.assessment-report > div:first-of-type > button,
+.excel-download {
+  font-size: 13px !important;
+  line-height: 1.25;
+  padding: 11px 15px !important;
+}
+.excel-ready.is-disabled {
+  border-color: #ded8e4;
+  background: #f8f6fa;
+}
+.excel-ready.is-disabled strong,
+.excel-ready.is-disabled p {
+  color: #77717d;
+}
+.excel-ready .excel-download:disabled {
+  background: #aaa2b3;
+  color: #fff;
+  cursor: not-allowed;
+  box-shadow: none;
+}

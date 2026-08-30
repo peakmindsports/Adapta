@@ -8,7 +8,7 @@ function extractText(data: any): string {
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   await ensureSchema(); const { id } = await context.params; const owner = await activeOwnerFrom(request); if (!owner) return authenticationError();
   const body = await request.json() as { targetCourse?: string };
-  const courses = ["1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO", "3º de ESO", "4º de ESO"];
+  const courses = ["3 años de Infantil", "4 años de Infantil", "5 años de Infantil", "1º de Primaria", "2º de Primaria", "3º de Primaria", "4º de Primaria", "5º de Primaria", "6º de Primaria", "1º de ESO", "2º de ESO", "3º de ESO", "4º de ESO"];
   if (!body.targetCourse || !courses.includes(body.targetCourse)) return jsonError("Selecciona un nivel educativo válido.");
   const { DB, OPENAI_API_KEY, OPENAI_MODEL } = runtime();
   if (!OPENAI_API_KEY) return jsonError("El administrador debe configurar OPENAI_API_KEY.", 503);
