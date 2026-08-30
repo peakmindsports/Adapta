@@ -4,7 +4,7 @@ import UPNG from "@pdf-lib/upng";
 import jpeg from "jpeg-js";
 import { authenticationError, ensureSchema, jsonError, activeOwnerFrom, runtime, safeFilename } from "../../../_shared";
 
-type Block = { type: "heading" | "bullet" | "checkbox" | "number" | "paragraph" | "tableRow" | "card" | "break" | "image" | "match"; text: string; second?: string; level?: number; cells?: string[] };
+type Block = { type: "heading" | "bullet" | "checkbox" | "number" | "paragraph" | "tableRow" | "card" | "visual" | "break" | "image" | "match"; text: string; second?: string; level?: number; cells?: string[] };
 type SourceImage = { bytes: Uint8Array; width: number; height: number; type: "jpg" | "png" };
 type CoverDetails = { subject?: string | null; student?: string | null; course?: string | null; academicYear?: string | null; audience?: "all" | "student" | "teacher" };
 
@@ -61,10 +61,11 @@ function parseMarkdown(markdown: string): Block[] {
   const flush = () => { if (paragraph.length) blocks.push({ type: "paragraph", text: cleanMarkdown(paragraph.join(" ")) }); paragraph = []; };
   for (const raw of markdown.replace(/\r/g, "").split("\n")) {
     const line = raw.trim(); if (!line) { flush(); continue; }
-    const heading = line.match(/^(#{1,6})\s+(.+)$/); const checkbox = line.match(/^[-*+]\s+\[\s*\]\s+(.+)$/); const bullet = line.match(/^[-*+]\s+(.+)$/); const number = line.match(/^\d+[.)]\s+(.+)$/); const image = line.match(/^\[IMAGEN:\s*(.+)\]$/i); const card = line.match(/^(?:>\s*)?\[TARJETA:\s*(.+)\]$/i); const match = line.match(/^\[UNIR:\s*(.+?)\s*\|\|\s*(.+)\]$/i);
+    const heading = line.match(/^(#{1,6})\s+(.+)$/); const checkbox = line.match(/^[-*+]\s+\[\s*\]\s+(.+)$/); const bullet = line.match(/^[-*+]\s+(.+)$/); const number = line.match(/^\d+[.)]\s+(.+)$/); const image = line.match(/^\[IMAGEN:\s*(.+)\]$/i); const card = line.match(/^(?:>\s*)?\[TARJETA:\s*(.+)\]$/i); const visual = line.match(/^\[LAMINA:\s*(.+)\]$/i); const match = line.match(/^\[UNIR:\s*(.+?)\s*\|\|\s*(.+)\]$/i);
     if (heading) { flush(); blocks.push({ type: "heading", text: cleanMarkdown(heading[2]), level: Math.min(3, heading[1].length) }); }
     else if (image) { flush(); blocks.push({ type: "image", text: cleanMarkdown(image[1]) }); }
     else if (card) { flush(); blocks.push({ type: "card", text: cleanMarkdown(card[1]) }); }
+    else if (visual) { flush(); const parts = visual[1].split("||").map((part) => cleanMarkdown(part)); blocks.push({ type: "visual", text: parts[0], cells: parts.slice(1) }); }
     else if (match) { flush(); blocks.push({ type: "match", text: cleanMarkdown(match[1]), second: cleanMarkdown(match[2]) }); }
     else if (checkbox) { flush(); blocks.push({ type: "checkbox", text: cleanMarkdown(checkbox[1]) }); }
     else if (bullet) { flush(); blocks.push({ type: "bullet", text: cleanMarkdown(bullet[1]) }); }
@@ -166,6 +167,10 @@ async function makeWord(title: string, markdown: string, images: Array<SourceIma
       const image = images[imageIndex++];
       if (image) { const scale = Math.min(470 / image.width, 260 / image.height, 1); children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ type: image.type, data: image.bytes, transformation: { width: Math.round(image.width * scale), height: Math.round(image.height * scale) } })], spacing: { before: 120, after: 140 } })); }
     } else if (block.type === "card") {
+    } else if (block.type === "visual") {
+      const items = block.cells?.length ? block.cells : ["Observa con atención"]; children.push(new Paragraph({ text: block.text, heading: HeadingLevel.HEADING_3, keepNext: true, spacing: { before: 180, after: 100 } }));
+      children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, columnWidths: [4700, 4700], rows: items.map((item, index) => new TableRow({ cantSplit: true, children: [new TableCell({ shading: { fill: index % 2 ? "FFF1DD" : "EAF6F3" }, children: [new Paragraph({ text: item, alignment: AlignmentType.CENTER, spacing: { before: 180, after: 180, line: 300 } })] }), new TableCell({ shading: { fill: index % 2 ? "EAF6F3" : "FFF1DD" }, children: [new Paragraph({ text: `Detalle ${index + 1}: ____________________`, alignment: AlignmentType.CENTER, spacing: { before: 180, after: 180, line: 300 } })] })] })) }));
+      children.push(new Paragraph({ text: "", spacing: { after: 180 } }));
       children.push(new Paragraph({ alignment: AlignmentType.CENTER, keepLines: true, keepNext: true, children: [new TextRun({ text: "✂  TARJETA PARA RECORTAR", bold: true, size: 16, color: "A06A13" }), new TextRun({ break: 1, text: block.text, bold: true, size: 26, color: "172B30" })], shading: { fill: "FFF4D6" }, border: { top: { color: "E1A93B", style: "dashed", size: 10 }, bottom: { color: "E1A93B", style: "dashed", size: 10 }, left: { color: "E1A93B", style: "dashed", size: 10 }, right: { color: "E1A93B", style: "dashed", size: 10 } }, spacing: { before: 140, after: 180, line: 340 }, indent: { left: 220, right: 220 } }));
     } else if (block.type === "match") {
       children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, columnWidths: [4700, 4700], rows: [new TableRow({ children: [new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: [new Paragraph({ text: block.text, spacing: { before: 100, after: 100 } })] }), new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: [new Paragraph({ text: block.second || "", spacing: { before: 100, after: 100 } })] })] })] }));
@@ -189,7 +194,11 @@ async function makeWord(title: string, markdown: string, images: Array<SourceIma
 function pdfSafe(value: string) { return value.normalize("NFKC").replace(/[\u2013\u2014]/g, "-").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^\x20-\x7E\xA0-\xFF]/g, ""); }
 function wrapText(text: string, maxWidth: number, size: number, font: { widthOfTextAtSize(text: string, size: number): number }) {
   const lines: string[] = []; let current = "";
-  for (const word of pdfSafe(text).split(/\s+/)) { const candidate = current ? `${current} ${word}` : word; if (font.widthOfTextAtSize(candidate, size) <= maxWidth) current = candidate; else { if (current) lines.push(current); current = word; } }
+  for (const original of pdfSafe(text).split(/\s+/)) { const pieces: string[] = []; let word = original;
+    while (font.widthOfTextAtSize(word, size) > maxWidth && word.length > 1) { let cut = word.length - 1; while (cut > 1 && font.widthOfTextAtSize(word.slice(0, cut) + "-", size) > maxWidth) cut -= 1; pieces.push(word.slice(0, cut) + "-"); word = word.slice(cut); }
+    pieces.push(word);
+    for (const piece of pieces) { const candidate = current ? `${current} ${piece}` : piece; if (font.widthOfTextAtSize(candidate, size) <= maxWidth) current = candidate; else { if (current) lines.push(current); current = piece; } }
+  }
   if (current) lines.push(current); return lines.length ? lines : [""];
 }
 
@@ -220,6 +229,10 @@ export async function makePdf(title: string, markdown: string, images: Array<Sou
       const cardWidth = pageSize[0] - margin * 2 - 36; const cardLines = wrapText(block.text, cardWidth - 32, 12, bold); const cardHeight = Math.max(86, cardLines.length * 18 + 50); if (y - cardHeight < margin + 28) addPage(); const cardX = margin + 18; const cardBottom = y - cardHeight;
       page.drawRectangle({ x: cardX, y: cardBottom, width: cardWidth, height: cardHeight, color: rgb(1, 0.96, 0.84), borderColor: rgb(0.88, 0.6, 0.18), borderWidth: 1.5, borderDashArray: [6, 4] }); page.drawText("RECORTA ESTA TARJETA", { x: cardX + 16, y: y - 21, size: 8, font: bold, color: rgb(0.63, 0.42, 0.07) });
       cardLines.forEach((line, index) => { const lineWidth = bold.widthOfTextAtSize(line, 12); page.drawText(line, { x: cardX + Math.max(16, (cardWidth - lineWidth) / 2), y: y - 49 - index * 18, size: 12, font: bold, color: rgb(0.09, 0.17, 0.19) }); }); y = cardBottom - 20;
+    } else if (block.type === "visual") {
+      const items = block.cells?.length ? block.cells : ["Observa con atención"]; const visualHeight = Math.max(120, 44 + items.length * 38); if (y - visualHeight < margin + 28) addPage(); const top = y; page.drawRectangle({ x: margin, y: top - visualHeight, width: pageSize[0] - margin * 2, height: visualHeight, color: rgb(.96,.98,.97), borderColor: rgb(.15,.5,.57), borderWidth: 1.5 }); page.drawText(pdfSafe(block.text), { x: margin + 14, y: top - 24, size: 13, font: bold, color: rgb(.09,.17,.19) });
+      items.forEach((item,index) => { const itemTop = top - 44 - index * 38; page.drawRectangle({ x: margin + 12, y: itemTop - 27, width: pageSize[0] - margin * 2 - 24, height: 31, color: index % 2 ? rgb(1,.95,.86) : rgb(.9,.96,.94) }); const lines = wrapText(item, pageSize[0] - margin * 2 - 48, 9.5, regular); lines.slice(0,2).forEach((line,lineIndex)=>page.drawText(line,{x:margin+24,y:itemTop-8-lineIndex*11,size:9.5,font:regular,color:rgb(.12,.17,.18)})); }); y = top - visualHeight - 18;
+
     } else if (block.type === "match") {
       const leftLines = wrapText(block.text, 190, 10.5, regular); const rightLines = wrapText(block.second || "", 190, 10.5, regular); const boxHeight = Math.max(42, Math.max(leftLines.length, rightLines.length) * 15 + 18); if (y - boxHeight < margin + 28) addPage();
       page.drawRectangle({ x: margin, y: y - boxHeight, width: 205, height: boxHeight, color: rgb(0.96, 0.98, 1), borderColor: rgb(0.38, 0.58, 0.74), borderWidth: 1 }); page.drawRectangle({ x: pageSize[0] - margin - 205, y: y - boxHeight, width: 205, height: boxHeight, color: rgb(1, 0.97, 0.91), borderColor: rgb(0.9, 0.55, 0.25), borderWidth: 1 });
@@ -232,7 +245,7 @@ export async function makePdf(title: string, markdown: string, images: Array<Sou
     } else if (block.type === "heading") { if (!firstHeading && block.level === 1 && y < pageSize[1] - margin - 80) addPage(); if (/brica anal|lista de observaci/i.test(block.text) && y < 500) addPage(); firstHeading = false; const activityHeading = /actividad|producto final|demuestro|repaso|juego|taller/i.test(block.text); if (activityHeading && y < pageSize[1] - margin - 30) y -= 26; else y -= block.level === 1 ? 10 : 4; if (activityHeading) { if (y < margin + 90) addPage(); page.drawRectangle({ x: margin - 8, y: y - 8, width: pageSize[0] - margin * 2 + 16, height: 30, color: rgb(0.99, 0.9, 0.84), borderColor: rgb(0.9, 0.62, 0.52), borderWidth: .8 }); } const activityCode = block.text.match(/\[(ACT-[A-Z0-9-]+)\]/i)?.[1]?.toUpperCase(); if (activityCode && !activityLocations.some((item) => item.code === activityCode)) activityLocations.push({ code: activityCode, title: block.text.replace(/\[ACT-[A-Z0-9-]+\]\s*/i, "").trim(), page: pdf.getPageCount() }); draw(block.text, block.level === 1 ? 18 : block.level === 2 ? 15 : 12, true, block.level === 1 ? rgb(0.15, 0.5, 0.57) : rgb(0.09, 0.17, 0.19), 0, activityHeading ? 12 : 8); }
     else if (block.type === "bullet") draw(`- ${block.text}`, 10.5, false, rgb(0.18, 0.25, 0.26), 12, 4);
     else if (block.type === "number") { y -= 7; draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 12, 13); }
-    else draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 0, 12);
+    else { if (previousBlockType === "tableRow") y -= 18; draw(block.text, 10.5, false, rgb(0.18, 0.25, 0.26), 0, 12); }
     previousBlockType = block.type;
   }
   if (includeActivityMap && activityLocations.length) {
