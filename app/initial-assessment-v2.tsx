@@ -90,6 +90,8 @@ export default function InitialAssessment() {
   const toggle = (s: string) => {
     setChosen((x) => (x.includes(s) ? x.filter((v) => v !== s) : [...x, s]));
     setCurricula([]);
+    setProgress(0);
+    setLabel("");
   };
   async function consult() {
     if (!course || !chosen.length)
@@ -97,17 +99,30 @@ export default function InitialAssessment() {
     setBusy(true);
     setNotice("");
     setCurricula([]);
+    setProgress(1);
     const found: Cur[] = [];
     try {
       for (let i = 0; i < chosen.length; i++) {
         setLabel(`Consultando ${chosen[i]}`);
-        setProgress(Math.round((i / chosen.length) * 100));
-        const r = await fetch("/api/curriculum-v2", {
+        const start = Math.round((i / chosen.length) * 100);
+        const end = Math.round(((i + 1) / chosen.length) * 100);
+        const step = Math.max(1, Math.ceil((end - start) / 18));
+        const timer = window.setInterval(
+          () => setProgress((value) => Math.min(end - 2, value + step)),
+          650,
+        );
+        setProgress(Math.max(1, start));
+        let r: Response;
+        try {
+          r = await fetch("/api/curriculum-v2", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ course, subject: chosen[i] }),
-          }),
-          b = await body(r);
+          });
+        } finally {
+          window.clearInterval(timer);
+        }
+        const b = await body(r);
         if (!r.ok) throw new Error(b.error);
         found.push({ ...b, subject: chosen[i] });
         setCurricula([...found]);
@@ -117,6 +132,7 @@ export default function InitialAssessment() {
       setNotice(
         `${found.length} currículo${found.length === 1 ? "" : "s"} preparado${found.length === 1 ? "" : "s"}.`,
       );
+      setLabel("Competencias preparadas");
     } catch (e) {
       setNotice(
         e instanceof Error ? e.message : "No se pudo consultar el currículo.",
@@ -296,6 +312,8 @@ export default function InitialAssessment() {
                       setCourse(e.target.value);
                       setChosen([]);
                       setCurricula([]);
+                      setProgress(0);
+                      setLabel("");
                     }}
                   >
                     <option value="">Selecciona el curso</option>
@@ -351,7 +369,7 @@ export default function InitialAssessment() {
               >
                 Obtener competencias específicas
               </button>
-              {busy && <Progress label={label} value={progress} />}{" "}
+              {(busy || progress > 0) && <Progress label={label} value={progress} />}
               {curricula.map((c) => (
                 <details className="curriculum-summary" key={c.subject}>
                   <summary>
