@@ -5,6 +5,7 @@ import UserManual from "./manual";
 import InitialAssessment from "./initial-assessment-v2";
 import AdminVisibility, { defaultFeatureVisibility, FeatureKey, FeatureVisibility } from "./admin-visibility-v2";
 import "./new-features.css";
+import "./admin-placement.css";
 
 type View = "home" | "adaptacion" | "proyecto" | "orientacion" | "evaluacion";
 type UploadKey = "dictamen" | "programacion" | "criterios" | "unidades" | "material" | "proyecto" | "project_math" | "project_math_program" | "project_math_criteria" | "project_math_material" | "project_language" | "project_language_program" | "project_language_criteria" | "project_language_material" | "project_science" | "project_science_program" | "project_science_criteria" | "project_science_material" | "project_english" | "project_english_program" | "project_english_criteria" | "project_english_material";
