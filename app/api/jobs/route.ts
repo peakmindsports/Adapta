@@ -16,6 +16,7 @@ export async function POST(request: Request) {
   const now = Date.now();
   let title = body.kind === "initial_assessment" ? `Evaluación inicial · ${body.subject || "Asignatura"} · ${body.currentCourse || "Curso"}` : body.kind === "reinforcement" ? `PRA · ${body.studentName || "Sin nombre"}` : body.kind === "adaptation" ? `ACS · ${body.studentName || "Sin nombre"}` : `Proyecto · ${body.theme || body.currentCourse || "Sin título"}`;
   if (body.kind === "project_adaptation") title = "Proyecto adaptado · " + (body.theme || body.currentCourse || "Sin título") + " · " + (body.studentName || body.targetCourse || "Nivel personalizado");
+  if (body.kind === "adaptation" && body.studentName?.startsWith("Banco del Departamento de Orientación · Otro material")) title = `Material similar · ${body.subject || "Área"} · ${body.targetCourse || body.currentCourse || "Curso"}`;
   const subject = body.kind.startsWith("project") ? "Interdisciplinar" : body.subject || null;
   await runtime().DB.prepare("INSERT INTO jobs (id, owner_email, kind, title, student_name, current_course, target_course, subject, academic_year, teacher_name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)").bind(id, owner, body.kind, title, body.studentName || null, body.currentCourse || null, body.targetCourse || null, subject, body.academicYear || null, body.teacherName || null, now, now).run();
   return Response.json({ job: { id, title, status: "draft" } }, { status: 201 });
