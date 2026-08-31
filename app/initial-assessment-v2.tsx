@@ -60,7 +60,8 @@ async function body(r: Response) {
   try {
     return JSON.parse(t);
   } catch {
-    return { error: t || "Respuesta no válida." };
+    const html = /<!doctype html|<html|cloudflare/i.test(t);
+    return { error: html ? "El servidor no pudo procesar el archivo. Inténtalo de nuevo; si continúa, comprueba que sea un Excel .xlsx válido." : t || "Respuesta no válida." };
   }
 }
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

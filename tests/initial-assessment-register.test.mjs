@@ -11,4 +11,9 @@ test("the initial assessment register mirrors the full teacher workflow",async()
  assert.match(route,/COUNTIF/);
  assert.match(route,/COUNTA/);
  assert.match(route,/analyzeRegister/);
+ assert.match(route,/analyzeCompatibleRegister/);
+ assert.match(route,/function compatibleValues/);
+ assert.match(route,/inputHeaders\.length\?inputHeaders/);
+ assert.match(route,/r:id/);
+ assert.match(route,/\(\?:\\\/\>\|>/);
 });

@@ -34,6 +34,28 @@ export function analyzeRegister(bytes:Uint8Array){
 
 analyze = analyzeRegister;
 
+function compatibleValues(xmlText:string,shared:string[]){
+ const cells=new Map<string,string>();
+ for(const match of xmlText.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
+  const ref=match[1].match(/\br="([A-Z]+\d+)"/)?.[1];if(!ref)continue;
+  const type=match[1].match(/\bt="([^"]+)"/)?.[1],inner=match[2]||"";
+  let value=inner.match(/<v>([\s\S]*?)<\/v>/)?.[1]||[...inner.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(item=>item[1]).join("");
+  if(type==="s")value=shared[Number(value)]||"";
+  cells.set(ref,value.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"'));
+ }
+ return cells;
+}
+
+function analyzeCompatibleRegister(bytes:Uint8Array){
+ const zip=unzipSync(bytes),sharedXml=zip["xl/sharedStrings.xml"]?strFromU8(zip["xl/sharedStrings.xml"]):"",shared=[...sharedXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(item=>[...item[1].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(text=>text[1]).join("")),workbook=strFromU8(zip["xl/workbook.xml"]),relationships=zip["xl/_rels/workbook.xml.rels"]?strFromU8(zip["xl/_rels/workbook.xml.rels"]):"",targets=new Map([...relationships.matchAll(/<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g)].map(item=>[item[1],`xl/${item[2].replace(/^\//,"")}`])),sheets=[...workbook.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g)].map((item,index)=>({name:item[1],path:targets.get(item[2])||`xl/worksheets/sheet${index+1}.xml`}));
+ let students=0;
+ const subjects=sheets.map(sheet=>{const raw=zip[sheet.path];if(!raw)return null;const cells=compatibleValues(strFromU8(raw),shared),headers=[...cells].map(([ref,value])=>({value:value.trim().toLowerCase(),row:Number(ref.match(/\d+/)?.[0]||0),column:ref.match(/[A-Z]+/)?.[0]||""})).filter(item=>item.row>0&&item.row<=12),inputHeaders=headers.filter(item=>item.value==="estado"),stateHeaders=inputHeaders.length?inputHeaders:headers.filter(item=>item.value==="estado final");if(!stateHeaders.length)return null;const headerRow=Math.min(...stateHeaders.map(item=>item.row)),stateColumns=stateHeaders.filter(item=>item.row===headerRow).map(item=>item.column),studentRows=[...cells].filter(([ref,value])=>/^A\d+$/.test(ref)&&Number(ref.slice(1))>headerRow&&value.trim()).map(([ref])=>Number(ref.slice(1))),counts={acquired:0,inProgress:0,notAcquired:0};students=Math.max(students,new Set(studentRows).size);for(const column of stateColumns)for(const row of studentRows){const state=(cells.get(`${column}${row}`)||"").trim().toLowerCase();if(state==="adquirido")counts.acquired++;else if(state==="en proceso")counts.inProgress++;else if(state==="no adquirido")counts.notAcquired++}const total=counts.acquired+counts.inProgress+counts.notAcquired||1,percentage=(value:number)=>Math.round(value/total*100),notAcquired=percentage(counts.notAcquired),inProgress=percentage(counts.inProgress);return{subject:sheet.name.replace(/^\d+\.\s*/,"").replace(/^Evaluación Inicial\s*/i,""),acquired:percentage(counts.acquired),inProgress,notAcquired,proposal:notAcquired>=35?"Priorizar las competencias no adquiridas mediante modelado, práctica guiada y seguimiento quincenal.":inProgress>=35?"Consolidar los aprendizajes en proceso con tareas graduadas, cooperación y retroalimentación frecuente.":"Mantener el avance con actividades de transferencia y apoyo específico al alumnado que aún lo necesite."}}).filter(Boolean);
+ if(!subjects.length)throw new Error("missing-state-columns");
+ return{students,subjects};
+}
+
+analyze = analyzeCompatibleRegister;
+
 function makeWorkbookLegacy(course:string,curricula:any[]){
  const sheets=curricula.map((item,index)=>({name:safeName(item.subject,index),item,id:index+1}));
  const types=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map(s=>`<Override PartName="/xl/worksheets/sheet${s.id}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`;
