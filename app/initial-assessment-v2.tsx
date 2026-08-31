@@ -115,6 +115,9 @@ export default function InitialAssessment({
     [course, setCourse] = useState(""),
     [chosen, setChosen] = useState<string[]>([]),
     [curricula, setCurricula] = useState<Cur[]>([]),
+    [selectedCompetencies, setSelectedCompetencies] = useState<
+      Record<string, string[]>
+    >({}),
     [files, setFiles] = useState<File[]>([]),
     [student, setStudent] = useState(""),
     [teacher, setTeacher] = useState(""),
@@ -134,6 +137,7 @@ export default function InitialAssessment({
   const toggle = (s: string) => {
     setChosen((x) => (x.includes(s) ? x.filter((v) => v !== s) : [...x, s]));
     setCurricula([]);
+    setSelectedCompetencies({});
     setProgress(0);
     setLabel("");
   };
@@ -143,6 +147,7 @@ export default function InitialAssessment({
     setBusy(true);
     setNotice("");
     setCurricula([]);
+    setSelectedCompetencies({});
     setProgress(1);
     const found: Cur[] = [];
     try {
@@ -169,6 +174,10 @@ export default function InitialAssessment({
         const b = await body(r);
         if (!r.ok) throw new Error(b.error);
         found.push({ ...b, subject: chosen[i] });
+        setSelectedCompetencies((current) => ({
+          ...current,
+          [chosen[i]]: b.competencies.map((competency: C) => competency.code),
+        }));
         setCurricula([...found]);
         setProgress(Math.round(((i + 1) / chosen.length) * 100));
         if (i + 1 < chosen.length) await wait(900);
@@ -223,8 +232,22 @@ export default function InitialAssessment({
     setNotice("");
     const made: Res[] = [];
     try {
-      for (let i = 0; i < curricula.length; i++) {
-        const c = curricula[i];
+      const selectedCurricula = curricula.map((curriculum) => ({
+        ...curriculum,
+        competencies: curriculum.competencies.filter((competency) =>
+          (selectedCompetencies[curriculum.subject] || []).includes(
+            competency.code,
+          ),
+        ),
+      }));
+      if (
+        selectedCurricula.some((curriculum) => !curriculum.competencies.length)
+      )
+        throw new Error(
+          "Selecciona al menos una competencia de cada asignatura.",
+        );
+      for (let i = 0; i < selectedCurricula.length; i++) {
+        const c = selectedCurricula[i];
         setLabel(`Creando ${c.subject}`);
         const start = Math.round((i / curricula.length) * 100);
         const end = Math.round(((i + 1) / curricula.length) * 100);
@@ -255,7 +278,7 @@ export default function InitialAssessment({
         setProgress(Math.round(start + (end - start) * 0.18));
         for (const file of files)
           await upload(created.job.id, file, "dictamen");
-        const notes = `Evaluación independiente de ${c.subject}. Incluye todas las competencias, pruebas y rúbricas con No adquirido, En proceso y Adquirido. ${files.length ? "Aplica ajustes equivalentes a partir de la documentación individual." : "Prueba común para el grupo."}\n\nCOMPETENCIAS ESPECÍFICAS OFICIALES YA DISPONIBLES (no solicites archivos ni información adicional):\n${c.competencies.map((competency) => `${competency.code}. ${competency.text}`).join("\n\n")}\n\nMAQUETACIÓN OBLIGATORIA: después de «Marca con una X» escribe cada opción en una línea independiente con «- [ ]». Después de «Ordena los hechos escribiendo 1, 2 y 3» escribe cada hecho en una línea independiente precedido por «- ____». Nunca concatenes respuestas, hechos ni opciones en un mismo párrafo. Cada «### Rúbrica analítica» debe comenzar en una página nueva y quedar seguida únicamente por su propia tabla.`;
+        const notes = `Evaluación independiente de ${c.subject}. Incluye únicamente las competencias seleccionadas, pruebas y rúbricas con No adquirido, En proceso y Adquirido. ${files.length ? "Aplica ajustes equivalentes a partir de la documentación individual." : "Prueba común para el grupo."}\n\nCOMPETENCIAS ESPECÍFICAS OFICIALES YA DISPONIBLES (no solicites archivos ni información adicional):\n${c.competencies.map((competency) => `${competency.code}. ${competency.text}`).join("\n\n")}\n\nMAQUETACIÓN OBLIGATORIA: después de «Marca con una X» escribe cada opción en una línea independiente con «- [ ]». Después de «Ordena los hechos escribiendo 1, 2 y 3» escribe cada hecho en una línea independiente precedido por «- ____». Nunca concatenes respuestas, hechos ni opciones en un mismo párrafo. Cada «### Rúbrica analítica» debe comenzar en una página nueva y quedar seguida únicamente por su propia tabla.`;
         setProgress(Math.round(start + (end - start) * 0.32));
         const generationTimer = window.setInterval(
           () =>
@@ -289,10 +312,26 @@ export default function InitialAssessment({
     }
   }
   async function excel() {
+    const selectedCurricula = curricula.map((curriculum) => ({
+      ...curriculum,
+      competencies: curriculum.competencies.filter((competency) =>
+        (selectedCompetencies[curriculum.subject] || []).includes(
+          competency.code,
+        ),
+      ),
+    }));
+    if (selectedCurricula.some((curriculum) => !curriculum.competencies.length))
+      return setNotice(
+        "Selecciona al menos una competencia de cada asignatura.",
+      );
     const r = await fetch("/api/initial-assessment-excel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "template", course, curricula }),
+      body: JSON.stringify({
+        action: "template",
+        course,
+        curricula: selectedCurricula,
+      }),
     });
     if (!r.ok) return setNotice((await body(r)).error);
     const a = document.createElement("a");
@@ -367,6 +406,7 @@ export default function InitialAssessment({
                       setCourse(e.target.value);
                       setChosen([]);
                       setCurricula([]);
+                      setSelectedCompetencies({});
                       setProgress(0);
                       setLabel("");
                     }}
@@ -388,6 +428,7 @@ export default function InitialAssessment({
                     onClick={() => {
                       setChosen(subjects);
                       setCurricula([]);
+                      setSelectedCompetencies({});
                     }}
                   >
                     Seleccionar todas
@@ -433,13 +474,59 @@ export default function InitialAssessment({
                 <details className="curriculum-summary" key={c.subject}>
                   <summary>
                     {c.subject}
-                    <span>{c.competencies.length} competencias</span>
+                    <span>
+                      {(selectedCompetencies[c.subject] || []).length} de{" "}
+                      {c.competencies.length} seleccionadas
+                    </span>
                   </summary>
+                  <div className="competency-actions">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedCompetencies((current) => ({
+                          ...current,
+                          [c.subject]: c.competencies.map(
+                            (competency) => competency.code,
+                          ),
+                        }))
+                      }
+                    >
+                      Seleccionar todas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedCompetencies((current) => ({
+                          ...current,
+                          [c.subject]: [],
+                        }))
+                      }
+                    >
+                      Deseleccionar todas
+                    </button>
+                  </div>
                   {c.competencies.map((x) => (
-                    <p key={x.code}>
+                    <label className="competency-choice" key={x.code}>
+                      <input
+                        type="checkbox"
+                        checked={(
+                          selectedCompetencies[c.subject] || []
+                        ).includes(x.code)}
+                        onChange={() =>
+                          setSelectedCompetencies((current) => {
+                            const selected = current[c.subject] || [];
+                            return {
+                              ...current,
+                              [c.subject]: selected.includes(x.code)
+                                ? selected.filter((code) => code !== x.code)
+                                : [...selected, x.code],
+                            };
+                          })
+                        }
+                      />
                       <b>{x.code}</b>
-                      {x.text}
-                    </p>
+                      <span>{x.text}</span>
+                    </label>
                   ))}
                 </details>
               ))}
@@ -464,7 +551,12 @@ export default function InitialAssessment({
                   disabled={
                     busy ||
                     !curricula.length ||
-                    curricula.length !== chosen.length
+                    curricula.length !== chosen.length ||
+                    curricula.some(
+                      (curriculum) =>
+                        !(selectedCompetencies[curriculum.subject] || [])
+                          .length,
+                    )
                   }
                   onClick={excel}
                 >
@@ -525,7 +617,14 @@ export default function InitialAssessment({
             {notice && <div className="success-note">{notice}</div>}
             <button
               className="primary assessment-generate"
-              disabled={busy || curricula.length !== chosen.length}
+              disabled={
+                busy ||
+                curricula.length !== chosen.length ||
+                curricula.some(
+                  (curriculum) =>
+                    !(selectedCompetencies[curriculum.subject] || []).length,
+                )
+              }
               onClick={generate}
             >
               {busy

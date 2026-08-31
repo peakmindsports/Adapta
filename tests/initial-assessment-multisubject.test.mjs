@@ -41,7 +41,7 @@ test("supports one, several or all subjects and sequential generation", async ()
   );
   assert.match(
     client,
-    /for\s*\(let i\s*=\s*0;\s*i\s*<\s*curricula\.length;\s*i\+\+\)/,
+    /for\s*\(let i\s*=\s*0;\s*i\s*<\s*selectedCurricula\.length;\s*i\+\+\)/,
   );
   assert.match(client, /Informe de Evaluación inicial/);
   assert.match(client, /initial-assessment-excel/);
@@ -49,6 +49,13 @@ test("supports one, several or all subjects and sequential generation", async ()
   assert.match(client, /Descargar Excel inicial/);
   assert.match(client, /3 años de Infantil/);
   assert.match(client, /Crecimiento en Armonía/);
+  assert.match(client, /selectedCompetencies/);
+  assert.match(client, /Deseleccionar todas/);
+  assert.match(
+    client,
+    /Selecciona al menos una competencia de cada asignatura/,
+  );
+  assert.match(client, /competencies: curriculum\.competencies\.filter/);
 });
 test("creates xlsx validations and analyzes the three states", async () => {
   const route = await read("app/api/initial-assessment-excel/route.ts");

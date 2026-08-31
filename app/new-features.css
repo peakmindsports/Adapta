@@ -256,37 +256,61 @@
   }
 }
 
-.curriculum-summary > p {
+.curriculum-summary > .competency-choice {
   margin: 10px 0 0;
   padding: 12px 14px;
   border: 1px solid #eadfe1;
   border-left: 6px solid #e05a47;
   border-radius: 10px;
   background: #fff5f2;
+  display: grid;
+  grid-template-columns: 20px 50px 1fr;
+  gap: 8px;
+  align-items: start;
+  font-size: 13px;
+  line-height: 1.45;
 }
-.curriculum-summary > p:nth-of-type(7n + 2) {
+.curriculum-summary > .competency-choice:nth-of-type(7n + 2) {
   border-left-color: #27889a;
   background: #eefafb;
 }
-.curriculum-summary > p:nth-of-type(7n + 3) {
+.curriculum-summary > .competency-choice:nth-of-type(7n + 3) {
   border-left-color: #7651a8;
   background: #f5f0fb;
 }
-.curriculum-summary > p:nth-of-type(7n + 4) {
+.curriculum-summary > .competency-choice:nth-of-type(7n + 4) {
   border-left-color: #d49a28;
   background: #fff9e9;
 }
-.curriculum-summary > p:nth-of-type(7n + 5) {
+.curriculum-summary > .competency-choice:nth-of-type(7n + 5) {
   border-left-color: #2d806c;
   background: #eef9f5;
 }
-.curriculum-summary > p:nth-of-type(7n + 6) {
+.curriculum-summary > .competency-choice:nth-of-type(7n + 6) {
   border-left-color: #c05d86;
   background: #fff1f7;
 }
-.curriculum-summary > p:nth-of-type(7n + 7) {
+.curriculum-summary > .competency-choice:nth-of-type(7n + 7) {
   border-left-color: #6474b8;
   background: #f1f3fc;
+}
+.competency-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.competency-actions button {
+  border: 1px solid #d8cce3;
+  border-radius: 8px;
+  background: white;
+  color: #65408f;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 750;
+}
+.competency-choice input {
+  margin-top: 3px;
+  accent-color: #7651a8;
 }
 .excel-ready {
   display: flex;
