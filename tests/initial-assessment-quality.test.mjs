@@ -21,5 +21,6 @@ test("initial-assessment exports remove private markers and protect rubric table
   assert.match(route, /INICIO_DOCENTE/);
   assert.match(route, /FIN_DOCENTE/);
   assert.match(route, /previousBlockType !== "tableRow" && y < 430/);
-  assert.match(route, /brica anal\|lista de observaci/);
+  assert.match(route, /\/brica anal\/i\.test\(block\.text\)/);
+  assert.match(route, /\/lista de observaci\/i\.test\(block\.text\)/);
 });

@@ -182,7 +182,9 @@ export default function InitialAssessment({ visibleCourses = courses }: { visibl
       for (let i = 0; i < curricula.length; i++) {
         const c = curricula[i];
         setLabel(`Creando ${c.subject}`);
-        setProgress(Math.round((i / curricula.length) * 100));
+        const start = Math.round((i / curricula.length) * 100);
+        const end = Math.round(((i + 1) / curricula.length) * 100);
+        setProgress(Math.max(2, start));
         const cr = await fetch("/api/jobs", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -197,6 +199,7 @@ export default function InitialAssessment({ visibleCourses = courses }: { visibl
           }),
           created = await body(cr);
         if (!cr.ok) throw new Error(created.error);
+        setProgress(Math.round(start + (end - start) * .08));
         const cf = new File(
           [
             `Fuente oficial: ${c.sourceTitle}\n${c.sourceUrl}\n\nCOMPETENCIAS:\n${c.competencies.map((x) => `${x.code}. ${x.text}`).join("\n\n")}`,
@@ -205,19 +208,22 @@ export default function InitialAssessment({ visibleCourses = courses }: { visibl
           { type: "text/plain" },
         );
         await upload(created.job.id, cf, "criterios");
+        setProgress(Math.round(start + (end - start) * .18));
         for (const file of files)
           await upload(created.job.id, file, "dictamen");
-        const notes = `Evaluación independiente de ${c.subject}. Incluye todas las competencias, pruebas y rúbricas con No adquirido, En proceso y Adquirido. ${files.length ? "Aplica ajustes equivalentes a partir de la documentación individual." : "Prueba común para el grupo."}\n\nCOMPETENCIAS ESPECÍFICAS OFICIALES YA DISPONIBLES (no solicites archivos ni información adicional):\n${c.competencies.map((competency) => `${competency.code}. ${competency.text}`).join("\n\n")}`;
+        const notes = `Evaluación independiente de ${c.subject}. Incluye todas las competencias, pruebas y rúbricas con No adquirido, En proceso y Adquirido. ${files.length ? "Aplica ajustes equivalentes a partir de la documentación individual." : "Prueba común para el grupo."}\n\nCOMPETENCIAS ESPECÍFICAS OFICIALES YA DISPONIBLES (no solicites archivos ni información adicional):\n${c.competencies.map((competency) => `${competency.code}. ${competency.text}`).join("\n\n")}\n\nMAQUETACIÓN OBLIGATORIA: después de «Marca con una X» escribe cada opción en una línea independiente con «- [ ]». Después de «Ordena los hechos escribiendo 1, 2 y 3» escribe cada hecho en una línea independiente precedido por «- ____». Nunca concatenes respuestas, hechos ni opciones en un mismo párrafo. Cada «### Rúbrica analítica» debe comenzar en una página nueva y quedar seguida únicamente por su propia tabla.`;
+        setProgress(Math.round(start + (end - start) * .32));
+        const generationTimer = window.setInterval(() => setProgress(value => Math.min(end - 2, value + Math.max(1, Math.ceil((end - start) / 45)))), 1500);
         const gr = await fetch(`/api/jobs/${created.job.id}/generate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ notes }),
-          }),
+          }).finally(() => window.clearInterval(generationTimer)),
           generated = await body(gr);
         if (!gr.ok) throw new Error(generated.error);
         made.push({ id: created.job.id, subject: c.subject });
         setResults([...made]);
-        setProgress(Math.round(((i + 1) / curricula.length) * 100));
+        setProgress(end);
         if (i + 1 < curricula.length) await wait(1200);
       }
       setNotice(
