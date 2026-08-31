@@ -356,7 +356,7 @@ export async function makeWorkbook(course: string, curricula: any[]) {
       "Puntuación",
       "Dificultades encontradas",
       "Resumen",
-      "N.º alumnado",
+      "Media",
       "Porcentaje",
     ],
     instruments = [
@@ -387,16 +387,39 @@ export async function makeWorkbook(course: string, curricula: any[]) {
     const last = Math.max(1, competencies.length * 9 + 1);
     sheet.mergeCells(1, 1, 1, last);
     sheet.getCell("A1").value = `${item.subject} · ${course}`;
-    sheet.mergeCells(2, 1, 2, last);
-    sheet.getCell("A2").value =
-      "Escribe los nombres desde A5. Cumplimenta los desplegables y las dificultades; la puntuación y los porcentajes se calculan automáticamente.";
     sheet.getColumn(1).width = 28;
-    sheet.getCell("A3").value = "Alumnado";
+    sheet.getCell("A2").value = "Alumnado";
+    sheet.getCell("A3").value = "Indicaciones";
     sheet.getCell("A4").value = "Nombre y apellidos";
+    const competenceColors = [
+      "FF7651A8",
+      "FFE85D4A",
+      "FF278FA0",
+      "FFE29A18",
+      "FF2F8A78",
+      "FFC65A84",
+      "FF516FA8",
+      "FF9A6B3F",
+    ];
     competencies.forEach((competency: any, index: number) => {
       const start = index * 9 + 2;
+      sheet.mergeCells(2, start, 2, start + 8);
+      const competenceHeader = sheet.getCell(2, start);
+      competenceHeader.value = `${competency.code} · ${competency.text}`;
+      competenceHeader.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      competenceHeader.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: competenceColors[index % competenceColors.length] },
+      };
+      competenceHeader.alignment = {
+        vertical: "middle",
+        horizontal: "center",
+        wrapText: true,
+      };
       sheet.mergeCells(3, start, 3, start + 8);
-      sheet.getCell(3, start).value = `${competency.code} · ${competency.text}`;
+      sheet.getCell(3, start).value =
+        "Estado en E: No adquirido = 1, En proceso = 2 y Adquirido = 3. La media se calcula en I y su porcentaje en J.";
       headers.forEach(
         (header, offset) => (sheet.getCell(4, start + offset).value = header),
       );
@@ -421,27 +444,28 @@ export async function makeWorkbook(course: string, curricula: any[]) {
           allowBlank: true,
           formulae: [`"${states.join(",")}"`],
         };
-        const state = col(start + 3);
+        const state = col(start + 3),
+          score = col(start + 4),
+          average = col(start + 7);
         sheet.getCell(row, start + 4).value = {
           formula: `IF(${state}${row}="No adquirido",1,IF(${state}${row}="En proceso",2,IF(${state}${row}="Adquirido",3,"")))`,
         };
-        if (row <= 7) {
-          const summary = col(start + 6),
-            count = col(start + 7);
-          sheet.getCell(row, start + 6).value = states[row - 5];
+        if (row === 5) {
+          sheet.getCell(row, start + 6).value = "Media de la competencia";
           sheet.getCell(row, start + 7).value = {
-            formula: `COUNTIF(${state}$5:${state}$34,${summary}${row})`,
+            formula: `IFERROR(AVERAGEIF($A$5:$A$34,"<>",${score}$5:${score}$34),0)`,
           };
+          sheet.getCell(row, start + 7).numFmt = "0.00";
           sheet.getCell(row, start + 8).value = {
-            formula: `IFERROR(${count}${row}/COUNTA($A$5:$A$34),0)`,
+            formula: `IFERROR(${average}${row}/3,0)`,
           };
           sheet.getCell(row, start + 8).numFmt = "0%";
         }
       }
     });
     sheet.getRow(1).height = 30;
-    sheet.getRow(2).height = 34;
-    sheet.getRow(3).height = 72;
+    sheet.getRow(2).height = 72;
+    sheet.getRow(3).height = 42;
     sheet.getRow(4).height = 42;
     for (let row = 5; row <= 34; row++) sheet.getRow(row).height = 30;
     for (const row of [1, 4])
@@ -458,7 +482,7 @@ export async function makeWorkbook(course: string, curricula: any[]) {
           wrapText: true,
         };
       });
-    for (const row of [2, 3])
+    for (const row of [3])
       sheet.getRow(row).eachCell((cell) => {
         cell.font = { bold: true, color: { argb: "FF2D2940" } };
         cell.fill = {
@@ -468,6 +492,17 @@ export async function makeWorkbook(course: string, curricula: any[]) {
         };
         cell.alignment = { vertical: "middle", wrapText: true };
       });
+    sheet.getCell("A2").font = { bold: true, color: { argb: "FFFFFFFF" } };
+    sheet.getCell("A2").fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF2D2940" },
+    };
+    sheet.getCell("A2").alignment = {
+      vertical: "middle",
+      horizontal: "center",
+      wrapText: true,
+    };
     sheet.eachRow((row, rowNumber) => {
       if (rowNumber >= 4)
         row.eachCell({ includeEmpty: true }, (cell) => {

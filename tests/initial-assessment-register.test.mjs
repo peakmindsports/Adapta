@@ -34,6 +34,11 @@ test("the initial assessment register mirrors the full teacher workflow", async 
   assert.match(route, /function compatibleValues/);
   assert.match(route, /inputHeaders\.length\s*\?\s*inputHeaders/);
   assert.match(route, /percentageDistribution/);
+  assert.match(route, /"Media"/);
+  assert.match(route, /AVERAGEIF\(\$A\$5:\$A\$34/);
+  assert.match(route, /IFERROR\(\$\{average\}\$\{row\}\/3,0\)/);
+  assert.match(route, /competenceColors/);
+  assert.match(route, /sheet\.mergeCells\(2, start, 2, start \+ 8\)/);
   assert.match(route, /r:id/);
   assert.match(route, /\(\?:\\\/\>\|>/);
 });
