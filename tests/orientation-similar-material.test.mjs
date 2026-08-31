@@ -9,7 +9,7 @@ test("only Orientation other material creates similar resources at the same cour
   readFile(new URL("../app/api/jobs/route.ts",import.meta.url),"utf8"),
  ]);
  assert.match(page,/orientationSource !== "other" && ready\.some/);
- assert.match(page,/orientationSource === "other" \? courses : courses\.filter/);
+ assert.match(page,/orientationSource === "other" \? courseVisibility\.orientacion : courseVisibility\.orientacion\.filter/);
  assert.match(page,/Crea material nuevo y similar/);
  assert.match(generator,/isOrientationOtherMaterial/);
  assert.match(generator,/MATERIAL NUEVO Y SIMILAR/);

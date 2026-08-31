@@ -15,7 +15,8 @@ test("persists six administrator-controlled visibility options", async () => {
 
 test("returns visibility with the session and protects direct navigation", async () => {
   const [session, page] = await Promise.all([read("app/api/session/route.ts"), read("app/page.tsx")]);
-  assert.match(session, /readFeatureVisibility/);
+  assert.match(session, /readVisibilitySettings/);
+  assert.match(session, /courseVisibility/);
   assert.match(session, /featureVisibility/);
   assert.match(page, /nextVisibility\[requested as FeatureKey\]/);
   assert.match(page, /Esta sección no está disponible actualmente/);

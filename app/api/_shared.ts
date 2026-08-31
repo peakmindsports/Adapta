@@ -92,7 +92,6 @@ export async function ensureSchema() {
     DB.prepare("CREATE TABLE IF NOT EXISTS improvement_proposals (id TEXT PRIMARY KEY NOT NULL, owner_email TEXT NOT NULL, category TEXT NOT NULL, message TEXT NOT NULL, status TEXT DEFAULT 'pending' NOT NULL, created_at INTEGER NOT NULL)"),
     DB.prepare("CREATE INDEX IF NOT EXISTS improvement_proposals_created_idx ON improvement_proposals(created_at DESC)"),
   ]);
-  await DB.prepare("UPDATE jobs SET shared_at = NULL WHERE shared_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM shared_resource_recipients WHERE shared_resource_recipients.job_id = jobs.id)").run();
   const columns = await DB.prepare("PRAGMA table_info(jobs)").all<{ name: string }>();
   const names = new Set(columns.results.map((column) => column.name));
   const additions = [
@@ -102,6 +101,7 @@ export async function ensureSchema() {
     ["shared_at", "ALTER TABLE jobs ADD COLUMN shared_at INTEGER"],
   ] as const;
   for (const [name, sql] of additions) if (!names.has(name)) await DB.prepare(sql).run();
+  await DB.prepare("UPDATE jobs SET shared_at = NULL WHERE shared_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM shared_resource_recipients WHERE shared_resource_recipients.job_id = jobs.id)").run();
   const proposalColumns = await DB.prepare("PRAGMA table_info(improvement_proposals)").all<{ name: string }>();
   const proposalNames = new Set(proposalColumns.results.map((column) => column.name));
   if (!proposalNames.has("resolved_at")) await DB.prepare("ALTER TABLE improvement_proposals ADD COLUMN resolved_at INTEGER").run();

@@ -17,6 +17,7 @@
                          "@pdf-lib/upng":  "^1.0.1",
                          "docx":  "^9.7.1",
                          "drizzle-orm":  "0.45.2",
+                         "exceljs":  "^4.4.0",
                          "jpeg-js":  "^0.4.4",
                          "next":  "16.2.6",
                          "pdf-lib":  "^1.17.1",
