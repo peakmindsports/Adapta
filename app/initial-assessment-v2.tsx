@@ -61,11 +61,54 @@ async function body(r: Response) {
     return JSON.parse(t);
   } catch {
     const html = /<!doctype html|<html|cloudflare/i.test(t);
-    return { error: html ? "El servidor no pudo procesar el archivo. Inténtalo de nuevo; si continúa, comprueba que sea un Excel .xlsx válido." : t || "Respuesta no válida." };
+    return {
+      error: html
+        ? "El servidor no pudo procesar el archivo. Inténtalo de nuevo; si continúa, comprueba que sea un Excel .xlsx válido."
+        : t || "Respuesta no válida.",
+    };
   }
 }
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-export default function InitialAssessment({ visibleCourses = courses }: { visibleCourses?: string[] }) {
+async function generateReliably(id: string, notes: string) {
+  let lastError = "No se pudo completar la evaluación inicial.";
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const response = await fetch(`/api/jobs/${id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes }),
+      });
+      const result = await body(response);
+      if (response.ok) return result;
+      lastError = result.error || lastError;
+      if (
+        response.status < 500 &&
+        response.status !== 409 &&
+        response.status !== 429
+      )
+        throw new Error(lastError);
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : lastError;
+    }
+    for (let poll = 0; poll < 36; poll++) {
+      await wait(10_000);
+      const response = await fetch(`/api/jobs/${id}`);
+      const job = await body(response);
+      if (response.ok && job.job?.status === "completed" && job.job?.result)
+        return { result: job.job.result };
+      if (response.ok && job.job?.status === "failed") {
+        lastError = job.job.errorMessage || lastError;
+        break;
+      }
+    }
+  }
+  throw new Error(lastError);
+}
+export default function InitialAssessment({
+  visibleCourses = courses,
+}: {
+  visibleCourses?: string[];
+}) {
   const support = useRef<HTMLInputElement>(null),
     reportInput = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"create" | "report">("create"),
@@ -200,7 +243,7 @@ export default function InitialAssessment({ visibleCourses = courses }: { visibl
           }),
           created = await body(cr);
         if (!cr.ok) throw new Error(created.error);
-        setProgress(Math.round(start + (end - start) * .08));
+        setProgress(Math.round(start + (end - start) * 0.08));
         const cf = new File(
           [
             `Fuente oficial: ${c.sourceTitle}\n${c.sourceUrl}\n\nCOMPETENCIAS:\n${c.competencies.map((x) => `${x.code}. ${x.text}`).join("\n\n")}`,
@@ -209,19 +252,24 @@ export default function InitialAssessment({ visibleCourses = courses }: { visibl
           { type: "text/plain" },
         );
         await upload(created.job.id, cf, "criterios");
-        setProgress(Math.round(start + (end - start) * .18));
+        setProgress(Math.round(start + (end - start) * 0.18));
         for (const file of files)
           await upload(created.job.id, file, "dictamen");
         const notes = `Evaluación independiente de ${c.subject}. Incluye todas las competencias, pruebas y rúbricas con No adquirido, En proceso y Adquirido. ${files.length ? "Aplica ajustes equivalentes a partir de la documentación individual." : "Prueba común para el grupo."}\n\nCOMPETENCIAS ESPECÍFICAS OFICIALES YA DISPONIBLES (no solicites archivos ni información adicional):\n${c.competencies.map((competency) => `${competency.code}. ${competency.text}`).join("\n\n")}\n\nMAQUETACIÓN OBLIGATORIA: después de «Marca con una X» escribe cada opción en una línea independiente con «- [ ]». Después de «Ordena los hechos escribiendo 1, 2 y 3» escribe cada hecho en una línea independiente precedido por «- ____». Nunca concatenes respuestas, hechos ni opciones en un mismo párrafo. Cada «### Rúbrica analítica» debe comenzar en una página nueva y quedar seguida únicamente por su propia tabla.`;
-        setProgress(Math.round(start + (end - start) * .32));
-        const generationTimer = window.setInterval(() => setProgress(value => Math.min(end - 2, value + Math.max(1, Math.ceil((end - start) / 45)))), 1500);
-        const gr = await fetch(`/api/jobs/${created.job.id}/generate`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ notes }),
-          }).finally(() => window.clearInterval(generationTimer)),
-          generated = await body(gr);
-        if (!gr.ok) throw new Error(generated.error);
+        setProgress(Math.round(start + (end - start) * 0.32));
+        const generationTimer = window.setInterval(
+          () =>
+            setProgress((value) =>
+              Math.min(
+                end - 2,
+                value + Math.max(1, Math.ceil((end - start) / 45)),
+              ),
+            ),
+          1500,
+        );
+        await generateReliably(created.job.id, notes).finally(() =>
+          window.clearInterval(generationTimer),
+        );
         made.push({ id: created.job.id, subject: c.subject });
         setResults([...made]);
         setProgress(end);
@@ -324,9 +372,11 @@ export default function InitialAssessment({ visibleCourses = courses }: { visibl
                     }}
                   >
                     <option value="">Selecciona el curso</option>
-                    {courses.filter((x) => visibleCourses.includes(x)).map((x) => (
-                      <option key={x}>{x}</option>
-                    ))}
+                    {courses
+                      .filter((x) => visibleCourses.includes(x))
+                      .map((x) => (
+                        <option key={x}>{x}</option>
+                      ))}
                   </select>
                 </label>
               </div>
@@ -376,7 +426,9 @@ export default function InitialAssessment({ visibleCourses = courses }: { visibl
               >
                 Obtener competencias específicas
               </button>
-              {(busy || progress > 0) && <Progress label={label} value={progress} />}
+              {(busy || progress > 0) && (
+                <Progress label={label} value={progress} />
+              )}
               {curricula.map((c) => (
                 <details className="curriculum-summary" key={c.subject}>
                   <summary>

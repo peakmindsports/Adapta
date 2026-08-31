@@ -2,92 +2,622 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import ExcelJS from "exceljs";
 import { activeOwnerFrom, authenticationError, jsonError } from "../_shared";
 
-const xml=(value:unknown)=>String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-const cell=(ref:string,value:string,style=0)=>`<c r="${ref}" t="inlineStr" s="${style}"><is><t xml:space="preserve">${xml(value)}</t></is></c>`;
-function col(index:number){let name="";for(let n=index;n;n=Math.floor((n-1)/26))name=String.fromCharCode(65+(n-1)%26)+name;return name}
-function safeName(value:string,index:number){return `${index+1}. ${value}`.replace(/[\\/*?:\[\]]/g," ").slice(0,31)}
-
-const formulaCell=(ref:string,formula:string,style=0)=>`<c r="${ref}" s="${style}"><f>${xml(formula)}</f></c>`;
-function assessmentSheet(course:string,item:any){
- const competencies=Array.isArray(item.competencies)?item.competencies:[],last=col(Math.max(1,competencies.length*9+1));
- const widths=`<cols><col min="1" max="1" width="28" customWidth="1"/>${competencies.map((_:any,i:number)=>{const start=i*9+2;return `<col min="${start}" max="${start}" width="22" customWidth="1"/><col min="${start+1}" max="${start+1}" width="25" customWidth="1"/><col min="${start+2}" max="${start+2}" width="30" customWidth="1"/><col min="${start+3}" max="${start+4}" width="14" customWidth="1"/><col min="${start+5}" max="${start+5}" width="34" customWidth="1"/><col min="${start+6}" max="${start+8}" width="15" customWidth="1"/>`}).join("")}</cols>`;
- const headers=["Instrumento","Medio de evaluación","Evidencia","Estado","Puntuación","Dificultades encontradas","Resumen","N.º alumnado","Porcentaje"];
- const title=`<row r="1" ht="30">${cell("A1",`${item.subject} · ${course}`,1)}<c r="${last}1"/></row>`;
- const guide=`<row r="2" ht="34">${cell("A2","Escribe los nombres desde A5. Cumplimenta los desplegables y las dificultades; la puntuación y los porcentajes se calculan automáticamente.",2)}<c r="${last}2"/></row>`;
- const competenceRow=`<row r="3" ht="72">${cell("A3","Alumnado",1)}${competencies.map((c:any,i:number)=>cell(`${col(i*9+2)}3`,`${c.code} · ${c.text}`,2)).join("")}</row>`;
- const headerRow=`<row r="4" ht="42"><c r="A4" s="1"/>${competencies.map((_:any,i:number)=>headers.map((h,j)=>cell(`${col(i*9+j+2)}4`,h,1)).join("")).join("")}</row>`;
- const dataRows=Array.from({length:30},(_,index)=>{const row=index+5;return `<row r="${row}" ht="30">${cell(`A${row}`,"",3)}${competencies.map((c:any,i:number)=>{const start=i*9+2,state=col(start+3),score=col(start+4),summary=col(start+6),count=col(start+7),percentage=col(start+8);const label=index===0?"No adquirido":index===1?"En proceso":index===2?"Adquirido":"";return `${cell(`${col(start)}${row}`,"",3)}${cell(`${col(start+1)}${row}`,"",3)}${cell(`${col(start+2)}${row}`,`Evaluación inicial generada · ${item.subject} · ${c.code}`,3)}${cell(`${state}${row}`,"",4)}${formulaCell(`${score}${row}`,`IF(${state}${row}="No adquirido",1,IF(${state}${row}="En proceso",2,IF(${state}${row}="Adquirido",3,"")))`,4)}${cell(`${col(start+5)}${row}`,"",3)}${cell(`${summary}${row}`,label,label?2:3)}${label?formulaCell(`${count}${row}`,`COUNTIF(${state}$5:${state}$34,${summary}${row})`,4):cell(`${count}${row}`,"",3)}${label?formulaCell(`${percentage}${row}`,`IFERROR(${count}${row}*100/COUNTA($A$5:$A$34),0)`,4):cell(`${percentage}${row}`,"",3)}`}).join("")}</row>`});
- const merges=[`A1:${last}1`,`A2:${last}2`,...competencies.map((_:any,i:number)=>`${col(i*9+2)}3:${col(i*9+10)}3`)];
- const ranges=(offset:number)=>competencies.map((_:any,i:number)=>`${col(i*9+2+offset)}5:${col(i*9+2+offset)}34`).join(" "),validations=competencies.length?`<dataValidations count="3"><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Instrumento no válido" error="Elige un instrumento de la lista." sqref="${ranges(0)}"><formula1>"Rúbrica,Lista de cotejo,Portafolio,Prueba escrita,Prueba práctica,Autoevaluación,Observación directa"</formula1></dataValidation><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Medio no válido" error="Elige un medio de evaluación de la lista." sqref="${ranges(1)}"><formula1>"Proyectos colaborativos,Presentaciones orales,Debates,Diario de reflexión,Mapas conceptuales"</formula1></dataValidation><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Estado no válido" error="Elige uno de los tres estados disponibles." sqref="${ranges(3)}"><formula1>"No adquirido,En proceso,Adquirido"</formula1></dataValidation></dataValidations>`:"";
- return `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView showGridLines="0" workbookViewId="0"><pane xSplit="1" ySplit="4" topLeftCell="B5" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>${widths}<sheetData>${title}${guide}${competenceRow}${headerRow}${dataRows.join("")}</sheetData><mergeCells count="${merges.length}">${merges.map(ref=>`<mergeCell ref="${ref}"/>`).join("")}</mergeCells><autoFilter ref="A4:${last}34"/>${validations}<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+function percentageDistribution(
+  notAcquired: number,
+  inProgress: number,
+  acquired: number,
+) {
+  const counts = [notAcquired, inProgress, acquired],
+    total = counts.reduce((sum, value) => sum + value, 0);
+  if (!total) return [0, 0, 0];
+  const exact = counts.map((value) => (value * 100) / total),
+    rounded = exact.map(Math.floor);
+  const remainder = 100 - rounded.reduce((sum, value) => sum + value, 0);
+  exact
+    .map((value, index) => ({ index, fraction: value - rounded[index] }))
+    .sort((a, b) => b.fraction - a.fraction || a.index - b.index)
+    .slice(0, remainder)
+    .forEach((item) => rounded[item.index]++);
+  return rounded;
 }
 
-export function analyzeRegister(bytes:Uint8Array){
- const zip=unzipSync(bytes),sharedXml=zip["xl/sharedStrings.xml"]?strFromU8(zip["xl/sharedStrings.xml"]):"",shared=[...sharedXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(m=>[...m[1].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(x=>x[1]).join("")),workbook=strFromU8(zip["xl/workbook.xml"]),names=[...workbook.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*sheetId="(\d+)"/g)].map(m=>({name:m[1],id:Number(m[2])}));
- let students=0;
- const subjects=names.map(s=>{const raw=zip[`xl/worksheets/sheet${s.id}.xml`];if(!raw)return null;const cells=values(strFromU8(raw),shared),stateColumns=[...cells].filter(([ref,value])=>/^[A-Z]+4$/.test(ref)&&value.trim().toLowerCase()==="estado").map(([ref])=>ref.match(/[A-Z]+/)?.[0]||"");
-  let named=0;for(let row=5;row<=34;row++)if((cells.get(`A${row}`)||"").trim())named++;students=Math.max(students,named);
-  const counts={acquired:0,inProgress:0,notAcquired:0};for(const column of stateColumns)for(let row=5;row<=34;row++){const normalized=(cells.get(`${column}${row}`)||"").trim().toLowerCase();if(normalized==="adquirido")counts.acquired++;else if(normalized==="en proceso")counts.inProgress++;else if(normalized==="no adquirido")counts.notAcquired++}
-  const total=counts.acquired+counts.inProgress+counts.notAcquired||1,p=(n:number)=>Math.round(n/total*100),not=p(counts.notAcquired),process=p(counts.inProgress);return{subject:s.name.replace(/^\\d+\\.\\s*/,""),acquired:p(counts.acquired),inProgress:process,notAcquired:not,proposal:not>=35?"Priorizar las competencias no adquiridas mediante modelado, práctica guiada y seguimiento quincenal.":process>=35?"Consolidar los aprendizajes en proceso con tareas graduadas, cooperación y retroalimentación frecuente.":"Mantener el avance con actividades de transferencia y apoyo específico al alumnado que aún lo necesite."}
- }).filter(Boolean);return{students,subjects}
+const xml = (value: unknown) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+const cell = (ref: string, value: string, style = 0) =>
+  `<c r="${ref}" t="inlineStr" s="${style}"><is><t xml:space="preserve">${xml(value)}</t></is></c>`;
+function col(index: number) {
+  let name = "";
+  for (let n = index; n; n = Math.floor((n - 1) / 26))
+    name = String.fromCharCode(65 + ((n - 1) % 26)) + name;
+  return name;
+}
+function safeName(value: string, index: number) {
+  return `${index + 1}. ${value}`.replace(/[\\/*?:\[\]]/g, " ").slice(0, 31);
+}
+
+const formulaCell = (ref: string, formula: string, style = 0) =>
+  `<c r="${ref}" s="${style}"><f>${xml(formula)}</f></c>`;
+function assessmentSheet(course: string, item: any) {
+  const competencies = Array.isArray(item.competencies)
+      ? item.competencies
+      : [],
+    last = col(Math.max(1, competencies.length * 9 + 1));
+  const widths = `<cols><col min="1" max="1" width="28" customWidth="1"/>${competencies
+    .map((_: any, i: number) => {
+      const start = i * 9 + 2;
+      return `<col min="${start}" max="${start}" width="22" customWidth="1"/><col min="${start + 1}" max="${start + 1}" width="25" customWidth="1"/><col min="${start + 2}" max="${start + 2}" width="30" customWidth="1"/><col min="${start + 3}" max="${start + 4}" width="14" customWidth="1"/><col min="${start + 5}" max="${start + 5}" width="34" customWidth="1"/><col min="${start + 6}" max="${start + 8}" width="15" customWidth="1"/>`;
+    })
+    .join("")}</cols>`;
+  const headers = [
+    "Instrumento",
+    "Medio de evaluación",
+    "Evidencia",
+    "Estado",
+    "Puntuación",
+    "Dificultades encontradas",
+    "Resumen",
+    "N.º alumnado",
+    "Porcentaje",
+  ];
+  const title = `<row r="1" ht="30">${cell("A1", `${item.subject} · ${course}`, 1)}<c r="${last}1"/></row>`;
+  const guide = `<row r="2" ht="34">${cell("A2", "Escribe los nombres desde A5. Cumplimenta los desplegables y las dificultades; la puntuación y los porcentajes se calculan automáticamente.", 2)}<c r="${last}2"/></row>`;
+  const competenceRow = `<row r="3" ht="72">${cell("A3", "Alumnado", 1)}${competencies.map((c: any, i: number) => cell(`${col(i * 9 + 2)}3`, `${c.code} · ${c.text}`, 2)).join("")}</row>`;
+  const headerRow = `<row r="4" ht="42"><c r="A4" s="1"/>${competencies.map((_: any, i: number) => headers.map((h, j) => cell(`${col(i * 9 + j + 2)}4`, h, 1)).join("")).join("")}</row>`;
+  const dataRows = Array.from({ length: 30 }, (_, index) => {
+    const row = index + 5;
+    return `<row r="${row}" ht="30">${cell(`A${row}`, "", 3)}${competencies
+      .map((c: any, i: number) => {
+        const start = i * 9 + 2,
+          state = col(start + 3),
+          score = col(start + 4),
+          summary = col(start + 6),
+          count = col(start + 7),
+          percentage = col(start + 8);
+        const label =
+          index === 0
+            ? "No adquirido"
+            : index === 1
+              ? "En proceso"
+              : index === 2
+                ? "Adquirido"
+                : "";
+        return `${cell(`${col(start)}${row}`, "", 3)}${cell(`${col(start + 1)}${row}`, "", 3)}${cell(`${col(start + 2)}${row}`, `Evaluación inicial generada · ${item.subject} · ${c.code}`, 3)}${cell(`${state}${row}`, "", 4)}${formulaCell(`${score}${row}`, `IF(${state}${row}="No adquirido",1,IF(${state}${row}="En proceso",2,IF(${state}${row}="Adquirido",3,"")))`, 4)}${cell(`${col(start + 5)}${row}`, "", 3)}${cell(`${summary}${row}`, label, label ? 2 : 3)}${label ? formulaCell(`${count}${row}`, `COUNTIF(${state}$5:${state}$34,${summary}${row})`, 4) : cell(`${count}${row}`, "", 3)}${label ? formulaCell(`${percentage}${row}`, `IFERROR(${count}${row}*100/COUNTA($A$5:$A$34),0)`, 4) : cell(`${percentage}${row}`, "", 3)}`;
+      })
+      .join("")}</row>`;
+  });
+  const merges = [
+    `A1:${last}1`,
+    `A2:${last}2`,
+    ...competencies.map(
+      (_: any, i: number) => `${col(i * 9 + 2)}3:${col(i * 9 + 10)}3`,
+    ),
+  ];
+  const ranges = (offset: number) =>
+      competencies
+        .map(
+          (_: any, i: number) =>
+            `${col(i * 9 + 2 + offset)}5:${col(i * 9 + 2 + offset)}34`,
+        )
+        .join(" "),
+    validations = competencies.length
+      ? `<dataValidations count="3"><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Instrumento no válido" error="Elige un instrumento de la lista." sqref="${ranges(0)}"><formula1>"Rúbrica,Lista de cotejo,Portafolio,Prueba escrita,Prueba práctica,Autoevaluación,Observación directa"</formula1></dataValidation><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Medio no válido" error="Elige un medio de evaluación de la lista." sqref="${ranges(1)}"><formula1>"Proyectos colaborativos,Presentaciones orales,Debates,Diario de reflexión,Mapas conceptuales"</formula1></dataValidation><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Estado no válido" error="Elige uno de los tres estados disponibles." sqref="${ranges(3)}"><formula1>"No adquirido,En proceso,Adquirido"</formula1></dataValidation></dataValidations>`
+      : "";
+  return `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView showGridLines="0" workbookViewId="0"><pane xSplit="1" ySplit="4" topLeftCell="B5" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>${widths}<sheetData>${title}${guide}${competenceRow}${headerRow}${dataRows.join("")}</sheetData><mergeCells count="${merges.length}">${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells><autoFilter ref="A4:${last}34"/>${validations}<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+}
+
+export function analyzeRegister(bytes: Uint8Array) {
+  const zip = unzipSync(bytes),
+    sharedXml = zip["xl/sharedStrings.xml"]
+      ? strFromU8(zip["xl/sharedStrings.xml"])
+      : "",
+    shared = [...sharedXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) =>
+      [...m[1].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)]
+        .map((x) => x[1])
+        .join(""),
+    ),
+    workbook = strFromU8(zip["xl/workbook.xml"]),
+    names = [
+      ...workbook.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*sheetId="(\d+)"/g),
+    ].map((m) => ({ name: m[1], id: Number(m[2]) }));
+  let students = 0;
+  const subjects = names
+    .map((s) => {
+      const raw = zip[`xl/worksheets/sheet${s.id}.xml`];
+      if (!raw) return null;
+      const cells = values(strFromU8(raw), shared),
+        stateColumns = [...cells]
+          .filter(
+            ([ref, value]) =>
+              /^[A-Z]+4$/.test(ref) && value.trim().toLowerCase() === "estado",
+          )
+          .map(([ref]) => ref.match(/[A-Z]+/)?.[0] || "");
+      let named = 0;
+      for (let row = 5; row <= 34; row++)
+        if ((cells.get(`A${row}`) || "").trim()) named++;
+      students = Math.max(students, named);
+      const counts = { acquired: 0, inProgress: 0, notAcquired: 0 };
+      for (const column of stateColumns)
+        for (let row = 5; row <= 34; row++) {
+          const normalized = (cells.get(`${column}${row}`) || "")
+            .trim()
+            .toLowerCase();
+          if (normalized === "adquirido") counts.acquired++;
+          else if (normalized === "en proceso") counts.inProgress++;
+          else if (normalized === "no adquirido") counts.notAcquired++;
+        }
+      const [not, process, acquired] = percentageDistribution(
+        counts.notAcquired,
+        counts.inProgress,
+        counts.acquired,
+      );
+      return {
+        subject: s.name.replace(/^\\d+\\.\\s*/, ""),
+        acquired,
+        inProgress: process,
+        notAcquired: not,
+        proposal:
+          not >= 35
+            ? "Priorizar las competencias no adquiridas mediante modelado, práctica guiada y seguimiento quincenal."
+            : process >= 35
+              ? "Consolidar los aprendizajes en proceso con tareas graduadas, cooperación y retroalimentación frecuente."
+              : "Mantener el avance con actividades de transferencia y apoyo específico al alumnado que aún lo necesite.",
+      };
+    })
+    .filter(Boolean);
+  return { students, subjects };
 }
 
 analyze = analyzeRegister;
 
-function compatibleValues(xmlText:string,shared:string[]){
- const cells=new Map<string,string>();
- for(const match of xmlText.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
-  const ref=match[1].match(/\br="([A-Z]+\d+)"/)?.[1];if(!ref)continue;
-  const type=match[1].match(/\bt="([^"]+)"/)?.[1],inner=match[2]||"";
-  let value=inner.match(/<v>([\s\S]*?)<\/v>/)?.[1]||[...inner.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(item=>item[1]).join("");
-  if(type==="s")value=shared[Number(value)]||"";
-  cells.set(ref,value.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"'));
- }
- return cells;
+function compatibleValues(xmlText: string, shared: string[]) {
+  const cells = new Map<string, string>();
+  for (const match of xmlText.matchAll(
+    /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g,
+  )) {
+    const ref = match[1].match(/\br="([A-Z]+\d+)"/)?.[1];
+    if (!ref) continue;
+    const type = match[1].match(/\bt="([^"]+)"/)?.[1],
+      inner = match[2] || "";
+    let value =
+      inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] ||
+      [...inner.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)]
+        .map((item) => item[1])
+        .join("");
+    if (type === "s") value = shared[Number(value)] || "";
+    cells.set(
+      ref,
+      value
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"'),
+    );
+  }
+  return cells;
 }
 
-function analyzeCompatibleRegister(bytes:Uint8Array){
- const zip=unzipSync(bytes),sharedXml=zip["xl/sharedStrings.xml"]?strFromU8(zip["xl/sharedStrings.xml"]):"",shared=[...sharedXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(item=>[...item[1].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(text=>text[1]).join("")),workbook=strFromU8(zip["xl/workbook.xml"]),relationships=zip["xl/_rels/workbook.xml.rels"]?strFromU8(zip["xl/_rels/workbook.xml.rels"]):"",targets=new Map([...relationships.matchAll(/<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g)].map(item=>[item[1],`xl/${item[2].replace(/^\//,"")}`])),sheets=[...workbook.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g)].map((item,index)=>({name:item[1],path:targets.get(item[2])||`xl/worksheets/sheet${index+1}.xml`}));
- let students=0;
- const subjects=sheets.map(sheet=>{const raw=zip[sheet.path];if(!raw)return null;const cells=compatibleValues(strFromU8(raw),shared),headers=[...cells].map(([ref,value])=>({value:value.trim().toLowerCase(),row:Number(ref.match(/\d+/)?.[0]||0),column:ref.match(/[A-Z]+/)?.[0]||""})).filter(item=>item.row>0&&item.row<=12),inputHeaders=headers.filter(item=>item.value==="estado"),stateHeaders=inputHeaders.length?inputHeaders:headers.filter(item=>item.value==="estado final");if(!stateHeaders.length)return null;const headerRow=Math.min(...stateHeaders.map(item=>item.row)),stateColumns=stateHeaders.filter(item=>item.row===headerRow).map(item=>item.column),studentRows=[...cells].filter(([ref,value])=>/^A\d+$/.test(ref)&&Number(ref.slice(1))>headerRow&&value.trim()).map(([ref])=>Number(ref.slice(1))),counts={acquired:0,inProgress:0,notAcquired:0};students=Math.max(students,new Set(studentRows).size);for(const column of stateColumns)for(const row of studentRows){const state=(cells.get(`${column}${row}`)||"").trim().toLowerCase();if(state==="adquirido")counts.acquired++;else if(state==="en proceso")counts.inProgress++;else if(state==="no adquirido")counts.notAcquired++}const total=counts.acquired+counts.inProgress+counts.notAcquired||1,percentage=(value:number)=>Math.round(value/total*100),notAcquired=percentage(counts.notAcquired),inProgress=percentage(counts.inProgress);return{subject:sheet.name.replace(/^\d+\.\s*/,"").replace(/^Evaluación Inicial\s*/i,""),acquired:percentage(counts.acquired),inProgress,notAcquired,proposal:notAcquired>=35?"Priorizar las competencias no adquiridas mediante modelado, práctica guiada y seguimiento quincenal.":inProgress>=35?"Consolidar los aprendizajes en proceso con tareas graduadas, cooperación y retroalimentación frecuente.":"Mantener el avance con actividades de transferencia y apoyo específico al alumnado que aún lo necesite."}}).filter(Boolean);
- if(!subjects.length)throw new Error("missing-state-columns");
- return{students,subjects};
+function analyzeCompatibleRegister(bytes: Uint8Array) {
+  const zip = unzipSync(bytes),
+    sharedXml = zip["xl/sharedStrings.xml"]
+      ? strFromU8(zip["xl/sharedStrings.xml"])
+      : "",
+    shared = [...sharedXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((item) =>
+      [...item[1].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)]
+        .map((text) => text[1])
+        .join(""),
+    ),
+    workbook = strFromU8(zip["xl/workbook.xml"]),
+    relationships = zip["xl/_rels/workbook.xml.rels"]
+      ? strFromU8(zip["xl/_rels/workbook.xml.rels"])
+      : "",
+    targets = new Map(
+      [
+        ...relationships.matchAll(
+          /<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g,
+        ),
+      ].map((item) => [item[1], `xl/${item[2].replace(/^\//, "")}`]),
+    ),
+    sheets = [
+      ...workbook.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g),
+    ].map((item, index) => ({
+      name: item[1],
+      path: targets.get(item[2]) || `xl/worksheets/sheet${index + 1}.xml`,
+    }));
+  let students = 0;
+  const subjects = sheets
+    .map((sheet) => {
+      const raw = zip[sheet.path];
+      if (!raw) return null;
+      const cells = compatibleValues(strFromU8(raw), shared),
+        headers = [...cells]
+          .map(([ref, value]) => ({
+            value: value.trim().toLowerCase(),
+            row: Number(ref.match(/\d+/)?.[0] || 0),
+            column: ref.match(/[A-Z]+/)?.[0] || "",
+          }))
+          .filter((item) => item.row > 0 && item.row <= 12),
+        inputHeaders = headers.filter((item) => item.value === "estado"),
+        stateHeaders = inputHeaders.length
+          ? inputHeaders
+          : headers.filter((item) => item.value === "estado final");
+      if (!stateHeaders.length) return null;
+      const headerRow = Math.min(...stateHeaders.map((item) => item.row)),
+        stateColumns = stateHeaders
+          .filter((item) => item.row === headerRow)
+          .map((item) => item.column),
+        studentRows = [...cells]
+          .filter(
+            ([ref, value]) =>
+              /^A\d+$/.test(ref) &&
+              Number(ref.slice(1)) > headerRow &&
+              value.trim(),
+          )
+          .map(([ref]) => Number(ref.slice(1))),
+        counts = { acquired: 0, inProgress: 0, notAcquired: 0 };
+      students = Math.max(students, new Set(studentRows).size);
+      for (const column of stateColumns)
+        for (const row of studentRows) {
+          const state = (cells.get(`${column}${row}`) || "")
+            .trim()
+            .toLowerCase();
+          if (state === "adquirido") counts.acquired++;
+          else if (state === "en proceso") counts.inProgress++;
+          else if (state === "no adquirido") counts.notAcquired++;
+        }
+      const [notAcquired, inProgress, acquired] = percentageDistribution(
+        counts.notAcquired,
+        counts.inProgress,
+        counts.acquired,
+      );
+      return {
+        subject: sheet.name
+          .replace(/^\d+\.\s*/, "")
+          .replace(/^Evaluación Inicial\s*/i, ""),
+        acquired,
+        inProgress,
+        notAcquired,
+        proposal:
+          notAcquired >= 35
+            ? "Priorizar las competencias no adquiridas mediante modelado, práctica guiada y seguimiento quincenal."
+            : inProgress >= 35
+              ? "Consolidar los aprendizajes en proceso con tareas graduadas, cooperación y retroalimentación frecuente."
+              : "Mantener el avance con actividades de transferencia y apoyo específico al alumnado que aún lo necesite.",
+      };
+    })
+    .filter(Boolean);
+  if (!subjects.length) throw new Error("missing-state-columns");
+  return { students, subjects };
 }
 
 analyze = analyzeCompatibleRegister;
 
-function makeWorkbookLegacy(course:string,curricula:any[]){
- const sheets=curricula.map((item,index)=>({name:safeName(item.subject,index),item,id:index+1}));
- const types=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map(s=>`<Override PartName="/xl/worksheets/sheet${s.id}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`;
- const rootRels=`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
- const workbook=`<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map(s=>`<sheet name="${xml(s.name)}" sheetId="${s.id}" r:id="rId${s.id}"/>`).join("")}</sheets></workbook>`;
- const workbookRels=`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map(s=>`<Relationship Id="rId${s.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${s.id}.xml"/>`).join("")}<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
- const styles=`<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="3"><font><sz val="11"/><name val="Aptos"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Aptos"/></font><font><b/><color rgb="FF2D2940"/><sz val="12"/><name val="Aptos"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF7651A8"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEFE8F7"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF8F5FB"/></patternFill></fill></fills><borders count="2"><border/><border><left style="thin"><color rgb="FFD9D0E4"/></left><right style="thin"><color rgb="FFD9D0E4"/></right><top style="thin"><color rgb="FFD9D0E4"/></top><bottom style="thin"><color rgb="FFD9D0E4"/></bottom></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1" vertical="center" horizontal="center"/></xf><xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1" vertical="center"/></xf><xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1" vertical="center"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="center"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><dxfs count="0"/><tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/></styleSheet>`;
- const files:Record<string,Uint8Array>={"[Content_Types].xml":strToU8(types),"_rels/.rels":strToU8(rootRels),"xl/workbook.xml":strToU8(workbook),"xl/_rels/workbook.xml.rels":strToU8(workbookRels),"xl/styles.xml":strToU8(styles)};
- sheets.forEach(s=>{const competencies=Array.isArray(s.item.competencies)?s.item.competencies:[],last=col(competencies.length+1);const widths=`<cols><col min="1" max="1" width="28" customWidth="1"/><col min="2" max="${competencies.length+1}" width="24" customWidth="1"/></cols>`;const rows=[`<row r="1" ht="28">${cell("A1",`${s.item.subject} · ${course}`,1)}${competencies.length?`<c r="${last}1"/>`:""}</row>`,`<row r="2" ht="52">${cell("A2","Alumnado",1)}${competencies.map((c:any,i:number)=>cell(`${col(i+2)}2`,`${c.code} · ${c.text}`,2)).join("")}</row>`,...Array.from({length:30},(_,i)=>`<row r="${i+3}" ht="24">${cell(`A${i+3}`,"",3)}${competencies.map((_:any,j:number)=>cell(`${col(j+2)}${i+3}`,"",4)).join("")}</row>`)];const validation=competencies.length?`<dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Estado no válido" error="Elige uno de los tres estados disponibles." sqref="B3:${last}32"><formula1>"No adquirido,En proceso,Adquirido"</formula1></dataValidation></dataValidations>`:"";files[`xl/worksheets/sheet${s.id}.xml`]=strToU8(`<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView showGridLines="0" workbookViewId="0"><pane xSplit="1" ySplit="2" topLeftCell="B3" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>${widths}<sheetData>${rows.join("")}</sheetData><autoFilter ref="A2:${last}32"/>${validation}<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>`)});
- sheets.forEach(s=>{files[`xl/worksheets/sheet${s.id}.xml`]=strToU8(assessmentSheet(course,s.item))});
- return zipSync(files,{level:6});
-}
-
-export async function makeWorkbook(course:string,curricula:any[]){
- const workbook=new ExcelJS.Workbook();workbook.creator="Adapta · Docencia a medida";workbook.created=new Date();workbook.calcProperties.fullCalcOnLoad=true;
- const headers=["Instrumento","Medio de evaluación","Evidencia","Estado","Puntuación","Dificultades encontradas","Resumen","N.º alumnado","Porcentaje"],instruments=["Rúbrica","Lista de cotejo","Portafolio","Prueba escrita","Prueba práctica","Autoevaluación","Observación directa"],media=["Proyectos colaborativos","Presentaciones orales","Debates","Diario de reflexión","Mapas conceptuales"],states=["No adquirido","En proceso","Adquirido"];
- for(let sheetIndex=0;sheetIndex<curricula.length;sheetIndex++){
-  const item=curricula[sheetIndex],competencies=Array.isArray(item.competencies)?item.competencies:[],sheet=workbook.addWorksheet(safeName(item.subject,sheetIndex),{views:[{state:"frozen",xSplit:1,ySplit:4,showGridLines:false}]});
-  const last=Math.max(1,competencies.length*9+1);sheet.mergeCells(1,1,1,last);sheet.getCell("A1").value=`${item.subject} · ${course}`;sheet.mergeCells(2,1,2,last);sheet.getCell("A2").value="Escribe los nombres desde A5. Cumplimenta los desplegables y las dificultades; la puntuación y los porcentajes se calculan automáticamente.";sheet.getColumn(1).width=28;sheet.getCell("A3").value="Alumnado";sheet.getCell("A4").value="Nombre y apellidos";
-  competencies.forEach((competency:any,index:number)=>{const start=index*9+2;sheet.mergeCells(3,start,3,start+8);sheet.getCell(3,start).value=`${competency.code} · ${competency.text}`;headers.forEach((header,offset)=>sheet.getCell(4,start+offset).value=header);[22,25,30,14,14,34,15,15,15].forEach((width,offset)=>sheet.getColumn(start+offset).width=width);
-   for(let row=5;row<=34;row++){sheet.getCell(row,start+2).value=`Evaluación inicial generada · ${item.subject} · ${competency.code}`;sheet.getCell(row,start).dataValidation={type:"list",allowBlank:true,formulae:[`"${instruments.join(",")}"`]};sheet.getCell(row,start+1).dataValidation={type:"list",allowBlank:true,formulae:[`"${media.join(",")}"`]};sheet.getCell(row,start+3).dataValidation={type:"list",allowBlank:true,formulae:[`"${states.join(",")}"`]};const state=col(start+3);sheet.getCell(row,start+4).value={formula:`IF(${state}${row}="No adquirido",1,IF(${state}${row}="En proceso",2,IF(${state}${row}="Adquirido",3,"")))`};if(row<=7){const summary=col(start+6),count=col(start+7);sheet.getCell(row,start+6).value=states[row-5];sheet.getCell(row,start+7).value={formula:`COUNTIF(${state}$5:${state}$34,${summary}${row})`};sheet.getCell(row,start+8).value={formula:`IFERROR(${count}${row}/COUNTA($A$5:$A$34),0)`};sheet.getCell(row,start+8).numFmt="0%";}}
+function makeWorkbookLegacy(course: string, curricula: any[]) {
+  const sheets = curricula.map((item, index) => ({
+    name: safeName(item.subject, index),
+    item,
+    id: index + 1,
+  }));
+  const types = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((s) => `<Override PartName="/xl/worksheets/sheet${s.id}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`;
+  const rootRels = `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
+  const workbook = `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s) => `<sheet name="${xml(s.name)}" sheetId="${s.id}" r:id="rId${s.id}"/>`).join("")}</sheets></workbook>`;
+  const workbookRels = `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((s) => `<Relationship Id="rId${s.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${s.id}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="3"><font><sz val="11"/><name val="Aptos"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Aptos"/></font><font><b/><color rgb="FF2D2940"/><sz val="12"/><name val="Aptos"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF7651A8"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEFE8F7"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF8F5FB"/></patternFill></fill></fills><borders count="2"><border/><border><left style="thin"><color rgb="FFD9D0E4"/></left><right style="thin"><color rgb="FFD9D0E4"/></right><top style="thin"><color rgb="FFD9D0E4"/></top><bottom style="thin"><color rgb="FFD9D0E4"/></bottom></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1" vertical="center" horizontal="center"/></xf><xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1" vertical="center"/></xf><xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1" vertical="center"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" horizontal="center"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><dxfs count="0"/><tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/></styleSheet>`;
+  const files: Record<string, Uint8Array> = {
+    "[Content_Types].xml": strToU8(types),
+    "_rels/.rels": strToU8(rootRels),
+    "xl/workbook.xml": strToU8(workbook),
+    "xl/_rels/workbook.xml.rels": strToU8(workbookRels),
+    "xl/styles.xml": strToU8(styles),
+  };
+  sheets.forEach((s) => {
+    const competencies = Array.isArray(s.item.competencies)
+        ? s.item.competencies
+        : [],
+      last = col(competencies.length + 1);
+    const widths = `<cols><col min="1" max="1" width="28" customWidth="1"/><col min="2" max="${competencies.length + 1}" width="24" customWidth="1"/></cols>`;
+    const rows = [
+      `<row r="1" ht="28">${cell("A1", `${s.item.subject} · ${course}`, 1)}${competencies.length ? `<c r="${last}1"/>` : ""}</row>`,
+      `<row r="2" ht="52">${cell("A2", "Alumnado", 1)}${competencies.map((c: any, i: number) => cell(`${col(i + 2)}2`, `${c.code} · ${c.text}`, 2)).join("")}</row>`,
+      ...Array.from(
+        { length: 30 },
+        (_, i) =>
+          `<row r="${i + 3}" ht="24">${cell(`A${i + 3}`, "", 3)}${competencies.map((_: any, j: number) => cell(`${col(j + 2)}${i + 3}`, "", 4)).join("")}</row>`,
+      ),
+    ];
+    const validation = competencies.length
+      ? `<dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Estado no válido" error="Elige uno de los tres estados disponibles." sqref="B3:${last}32"><formula1>"No adquirido,En proceso,Adquirido"</formula1></dataValidation></dataValidations>`
+      : "";
+    files[`xl/worksheets/sheet${s.id}.xml`] = strToU8(
+      `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView showGridLines="0" workbookViewId="0"><pane xSplit="1" ySplit="2" topLeftCell="B3" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>${widths}<sheetData>${rows.join("")}</sheetData><autoFilter ref="A2:${last}32"/>${validation}<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>`,
+    );
   });
-  sheet.getRow(1).height=30;sheet.getRow(2).height=34;sheet.getRow(3).height=72;sheet.getRow(4).height=42;for(let row=5;row<=34;row++)sheet.getRow(row).height=30;
-  for(const row of [1,4])sheet.getRow(row).eachCell(cell=>{cell.font={bold:true,color:{argb:"FFFFFFFF"}};cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF7651A8"}};cell.alignment={vertical:"middle",horizontal:"center",wrapText:true}});
-  for(const row of [2,3])sheet.getRow(row).eachCell(cell=>{cell.font={bold:true,color:{argb:"FF2D2940"}};cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFEFE8F7"}};cell.alignment={vertical:"middle",wrapText:true}});
-  sheet.eachRow((row,rowNumber)=>{if(rowNumber>=4)row.eachCell({includeEmpty:true},cell=>{cell.border={top:{style:"thin",color:{argb:"FFD9D0E4"}},left:{style:"thin",color:{argb:"FFD9D0E4"}},bottom:{style:"thin",color:{argb:"FFD9D0E4"}},right:{style:"thin",color:{argb:"FFD9D0E4"}}};cell.alignment={...cell.alignment,vertical:"middle",wrapText:true}})});
-  sheet.autoFilter={from:{row:4,column:1},to:{row:34,column:last}};sheet.pageSetup={orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:.3,right:.3,top:.5,bottom:.5,header:.2,footer:.2}};
- }
- const buffer=await workbook.xlsx.writeBuffer();return new Uint8Array(buffer as ArrayBuffer);
+  sheets.forEach((s) => {
+    files[`xl/worksheets/sheet${s.id}.xml`] = strToU8(
+      assessmentSheet(course, s.item),
+    );
+  });
+  return zipSync(files, { level: 6 });
 }
 
-function values(xmlText:string,shared:string[]){const cells=new Map<string,string>();for(const match of xmlText.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)){const ref=match[1].match(/\br="([A-Z]+\d+)"/)?.[1];if(!ref)continue;const type=match[1].match(/\bt="([^"]+)"/)?.[1],inner=match[2];let value=inner.match(/<v>([\s\S]*?)<\/v>/)?.[1]||[...inner.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(x=>x[1]).join("");if(type==="s")value=shared[Number(value)]||"";cells.set(ref,value.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"'))}return cells}
-export function analyze(bytes:Uint8Array){const zip=unzipSync(bytes),sharedXml=zip["xl/sharedStrings.xml"]?strFromU8(zip["xl/sharedStrings.xml"]):"",shared=[...sharedXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(m=>[...m[1].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(x=>x[1]).join(""));const workbook=strFromU8(zip["xl/workbook.xml"]),names=[...workbook.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*sheetId="(\d+)"/g)].map(m=>({name:m[1],id:Number(m[2])}));let students=0;const subjects=names.map(s=>{const raw=zip[`xl/worksheets/sheet${s.id}.xml`];if(!raw)return null;const cells=values(strFromU8(raw),shared),counts={acquired:0,inProgress:0,notAcquired:0};for(const [ref,value] of cells){const row=Number(ref.match(/\d+/)?.[0]||0),column=ref.match(/[A-Z]+/)?.[0];if(column==="A"&&row>=3&&value.trim())students=Math.max(students,row-2);if(row>=3&&column!=="A"){const normalized=value.trim().toLowerCase();if(normalized==="adquirido")counts.acquired++;else if(normalized==="en proceso")counts.inProgress++;else if(normalized==="no adquirido")counts.notAcquired++}}const total=counts.acquired+counts.inProgress+counts.notAcquired||1,p=(n:number)=>Math.round(n/total*100);const not=p(counts.notAcquired),process=p(counts.inProgress);return{subject:s.name.replace(/^\d+\.\s*/,""),acquired:p(counts.acquired),inProgress:process,notAcquired:not,proposal:not>=35?"Priorizar las competencias no adquiridas mediante modelado, práctica guiada y seguimiento quincenal.":process>=35?"Consolidar los aprendizajes en proceso con tareas graduadas, cooperación y retroalimentación frecuente.":"Mantener el avance con actividades de transferencia y apoyo específico al alumnado que aún lo necesite."}}).filter(Boolean);return{students,subjects}}
+export async function makeWorkbook(course: string, curricula: any[]) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Adapta · Docencia a medida";
+  workbook.created = new Date();
+  workbook.calcProperties.fullCalcOnLoad = true;
+  const headers = [
+      "Instrumento",
+      "Medio de evaluación",
+      "Evidencia",
+      "Estado",
+      "Puntuación",
+      "Dificultades encontradas",
+      "Resumen",
+      "N.º alumnado",
+      "Porcentaje",
+    ],
+    instruments = [
+      "Rúbrica",
+      "Lista de cotejo",
+      "Portafolio",
+      "Prueba escrita",
+      "Prueba práctica",
+      "Autoevaluación",
+      "Observación directa",
+    ],
+    media = [
+      "Proyectos colaborativos",
+      "Presentaciones orales",
+      "Debates",
+      "Diario de reflexión",
+      "Mapas conceptuales",
+    ],
+    states = ["No adquirido", "En proceso", "Adquirido"];
+  for (let sheetIndex = 0; sheetIndex < curricula.length; sheetIndex++) {
+    const item = curricula[sheetIndex],
+      competencies = Array.isArray(item.competencies) ? item.competencies : [],
+      sheet = workbook.addWorksheet(safeName(item.subject, sheetIndex), {
+        views: [
+          { state: "frozen", xSplit: 1, ySplit: 4, showGridLines: false },
+        ],
+      });
+    const last = Math.max(1, competencies.length * 9 + 1);
+    sheet.mergeCells(1, 1, 1, last);
+    sheet.getCell("A1").value = `${item.subject} · ${course}`;
+    sheet.mergeCells(2, 1, 2, last);
+    sheet.getCell("A2").value =
+      "Escribe los nombres desde A5. Cumplimenta los desplegables y las dificultades; la puntuación y los porcentajes se calculan automáticamente.";
+    sheet.getColumn(1).width = 28;
+    sheet.getCell("A3").value = "Alumnado";
+    sheet.getCell("A4").value = "Nombre y apellidos";
+    competencies.forEach((competency: any, index: number) => {
+      const start = index * 9 + 2;
+      sheet.mergeCells(3, start, 3, start + 8);
+      sheet.getCell(3, start).value = `${competency.code} · ${competency.text}`;
+      headers.forEach(
+        (header, offset) => (sheet.getCell(4, start + offset).value = header),
+      );
+      [22, 25, 30, 14, 14, 34, 15, 15, 15].forEach(
+        (width, offset) => (sheet.getColumn(start + offset).width = width),
+      );
+      for (let row = 5; row <= 34; row++) {
+        sheet.getCell(row, start + 2).value =
+          `Evaluación inicial generada · ${item.subject} · ${competency.code}`;
+        sheet.getCell(row, start).dataValidation = {
+          type: "list",
+          allowBlank: true,
+          formulae: [`"${instruments.join(",")}"`],
+        };
+        sheet.getCell(row, start + 1).dataValidation = {
+          type: "list",
+          allowBlank: true,
+          formulae: [`"${media.join(",")}"`],
+        };
+        sheet.getCell(row, start + 3).dataValidation = {
+          type: "list",
+          allowBlank: true,
+          formulae: [`"${states.join(",")}"`],
+        };
+        const state = col(start + 3);
+        sheet.getCell(row, start + 4).value = {
+          formula: `IF(${state}${row}="No adquirido",1,IF(${state}${row}="En proceso",2,IF(${state}${row}="Adquirido",3,"")))`,
+        };
+        if (row <= 7) {
+          const summary = col(start + 6),
+            count = col(start + 7);
+          sheet.getCell(row, start + 6).value = states[row - 5];
+          sheet.getCell(row, start + 7).value = {
+            formula: `COUNTIF(${state}$5:${state}$34,${summary}${row})`,
+          };
+          sheet.getCell(row, start + 8).value = {
+            formula: `IFERROR(${count}${row}/COUNTA($A$5:$A$34),0)`,
+          };
+          sheet.getCell(row, start + 8).numFmt = "0%";
+        }
+      }
+    });
+    sheet.getRow(1).height = 30;
+    sheet.getRow(2).height = 34;
+    sheet.getRow(3).height = 72;
+    sheet.getRow(4).height = 42;
+    for (let row = 5; row <= 34; row++) sheet.getRow(row).height = 30;
+    for (const row of [1, 4])
+      sheet.getRow(row).eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF7651A8" },
+        };
+        cell.alignment = {
+          vertical: "middle",
+          horizontal: "center",
+          wrapText: true,
+        };
+      });
+    for (const row of [2, 3])
+      sheet.getRow(row).eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FF2D2940" } };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFEFE8F7" },
+        };
+        cell.alignment = { vertical: "middle", wrapText: true };
+      });
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber >= 4)
+        row.eachCell({ includeEmpty: true }, (cell) => {
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFD9D0E4" } },
+            left: { style: "thin", color: { argb: "FFD9D0E4" } },
+            bottom: { style: "thin", color: { argb: "FFD9D0E4" } },
+            right: { style: "thin", color: { argb: "FFD9D0E4" } },
+          };
+          cell.alignment = {
+            ...cell.alignment,
+            vertical: "middle",
+            wrapText: true,
+          };
+        });
+    });
+    sheet.autoFilter = {
+      from: { row: 4, column: 1 },
+      to: { row: 34, column: last },
+    };
+    sheet.pageSetup = {
+      orientation: "landscape",
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      margins: {
+        left: 0.3,
+        right: 0.3,
+        top: 0.5,
+        bottom: 0.5,
+        header: 0.2,
+        footer: 0.2,
+      },
+    };
+  }
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Uint8Array(buffer as ArrayBuffer);
+}
 
-export async function POST(request:Request){const owner=await activeOwnerFrom(request);if(!owner)return authenticationError();const type=request.headers.get("content-type")||"";if(type.includes("application/json")){const data=await request.json() as any;if(data.action!=="template"||!data.course||!Array.isArray(data.curricula)||!data.curricula.length)return jsonError("Faltan el curso o las competencias.");const bytes=await makeWorkbook(data.course,data.curricula);return new Response(bytes,{headers:{"Content-Type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","Content-Disposition":`attachment; filename="registro-evaluacion-inicial.xlsx"`}})}const form=await request.formData(),file=form.get("file");if(!(file instanceof File)||!file.name.toLowerCase().endsWith(".xlsx"))return jsonError("Selecciona un archivo Excel .xlsx válido.");try{return Response.json(analyze(new Uint8Array(await file.arrayBuffer())))}catch{return jsonError("No se pudo leer el Excel. Utiliza el archivo generado por Evaluación inicial.",422)}}
+function values(xmlText: string, shared: string[]) {
+  const cells = new Map<string, string>();
+  for (const match of xmlText.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
+    const ref = match[1].match(/\br="([A-Z]+\d+)"/)?.[1];
+    if (!ref) continue;
+    const type = match[1].match(/\bt="([^"]+)"/)?.[1],
+      inner = match[2];
+    let value =
+      inner.match(/<v>([\s\S]*?)<\/v>/)?.[1] ||
+      [...inner.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)]
+        .map((x) => x[1])
+        .join("");
+    if (type === "s") value = shared[Number(value)] || "";
+    cells.set(
+      ref,
+      value
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"'),
+    );
+  }
+  return cells;
+}
+export function analyze(bytes: Uint8Array) {
+  const zip = unzipSync(bytes),
+    sharedXml = zip["xl/sharedStrings.xml"]
+      ? strFromU8(zip["xl/sharedStrings.xml"])
+      : "",
+    shared = [...sharedXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) =>
+      [...m[1].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)]
+        .map((x) => x[1])
+        .join(""),
+    );
+  const workbook = strFromU8(zip["xl/workbook.xml"]),
+    names = [
+      ...workbook.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*sheetId="(\d+)"/g),
+    ].map((m) => ({ name: m[1], id: Number(m[2]) }));
+  let students = 0;
+  const subjects = names
+    .map((s) => {
+      const raw = zip[`xl/worksheets/sheet${s.id}.xml`];
+      if (!raw) return null;
+      const cells = values(strFromU8(raw), shared),
+        counts = { acquired: 0, inProgress: 0, notAcquired: 0 };
+      for (const [ref, value] of cells) {
+        const row = Number(ref.match(/\d+/)?.[0] || 0),
+          column = ref.match(/[A-Z]+/)?.[0];
+        if (column === "A" && row >= 3 && value.trim())
+          students = Math.max(students, row - 2);
+        if (row >= 3 && column !== "A") {
+          const normalized = value.trim().toLowerCase();
+          if (normalized === "adquirido") counts.acquired++;
+          else if (normalized === "en proceso") counts.inProgress++;
+          else if (normalized === "no adquirido") counts.notAcquired++;
+        }
+      }
+      const [not, process, acquired] = percentageDistribution(
+        counts.notAcquired,
+        counts.inProgress,
+        counts.acquired,
+      );
+      return {
+        subject: s.name.replace(/^\d+\.\s*/, ""),
+        acquired,
+        inProgress: process,
+        notAcquired: not,
+        proposal:
+          not >= 35
+            ? "Priorizar las competencias no adquiridas mediante modelado, práctica guiada y seguimiento quincenal."
+            : process >= 35
+              ? "Consolidar los aprendizajes en proceso con tareas graduadas, cooperación y retroalimentación frecuente."
+              : "Mantener el avance con actividades de transferencia y apoyo específico al alumnado que aún lo necesite.",
+      };
+    })
+    .filter(Boolean);
+  return { students, subjects };
+}
+
+export async function POST(request: Request) {
+  const owner = await activeOwnerFrom(request);
+  if (!owner) return authenticationError();
+  const type = request.headers.get("content-type") || "";
+  if (type.includes("application/json")) {
+    const data = (await request.json()) as any;
+    if (
+      data.action !== "template" ||
+      !data.course ||
+      !Array.isArray(data.curricula) ||
+      !data.curricula.length
+    )
+      return jsonError("Faltan el curso o las competencias.");
+    const bytes = await makeWorkbook(data.course, data.curricula);
+    return new Response(bytes, {
+      headers: {
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="registro-evaluacion-inicial.xlsx"`,
+      },
+    });
+  }
+  const form = await request.formData(),
+    file = form.get("file");
+  if (!(file instanceof File) || !file.name.toLowerCase().endsWith(".xlsx"))
+    return jsonError("Selecciona un archivo Excel .xlsx válido.");
+  try {
+    return Response.json(analyze(new Uint8Array(await file.arrayBuffer())));
+  } catch {
+    return jsonError(
+      "No se pudo leer el Excel. Utiliza el archivo generado por Evaluación inicial.",
+      422,
+    );
+  }
+}
