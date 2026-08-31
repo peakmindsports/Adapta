@@ -36,3 +36,19 @@
   font-size: 9px;
   line-height: 1.5;
 }
+
+.orientation-reference-not-required {
+  margin: 14px 0 0;
+  padding: 14px 16px;
+  border: 1px solid #b9ddd3;
+  border-radius: 12px;
+  background: #eef9f5;
+  color: #245f53;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.orientation-reference-not-required strong {
+  display: block;
+  margin-bottom: 3px;
+}
