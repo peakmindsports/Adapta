@@ -64,7 +64,7 @@ async function body(r: Response) {
   }
 }
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-export default function InitialAssessment() {
+export default function InitialAssessment({ visibleCourses = courses }: { visibleCourses?: string[] }) {
   const support = useRef<HTMLInputElement>(null),
     reportInput = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"create" | "report">("create"),
@@ -317,7 +317,7 @@ export default function InitialAssessment() {
                     }}
                   >
                     <option value="">Selecciona el curso</option>
-                    {courses.map((x) => (
+                    {courses.filter((x) => visibleCourses.includes(x)).map((x) => (
                       <option key={x}>{x}</option>
                     ))}
                   </select>

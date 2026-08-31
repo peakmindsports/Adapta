@@ -45,10 +45,12 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   await ensureSchema();
-  if (!isSiteAdmin(request)) return jsonError("Solo la persona administradora puede consultar las propuestas.", 403);
   const url = new URL(request.url);
+  const owner = await activeOwnerFrom(request); if (!owner) return authenticationError();
+  const admin = isSiteAdmin(request);
   const attachmentKey = url.searchParams.get("attachment") || url.searchParams.get("image");
   if (attachmentKey) {
+    if (!admin) return jsonError("Solo la persona administradora puede consultar los adjuntos.", 403);
     if (!attachmentKey.startsWith("feedback/") || attachmentKey.includes("..")) return jsonError("Archivo no válido.", 400);
     const object = await runtime().FILES.get(attachmentKey);
     if (!object) return jsonError("Archivo no encontrado.", 404);
@@ -58,7 +60,10 @@ export async function GET(request: Request) {
     return new Response(object.body, { headers });
   }
 
-  const rows = await runtime().DB.prepare("SELECT id, owner_email AS ownerEmail, category, message, status, created_at AS createdAt FROM improvement_proposals ORDER BY created_at DESC").all();
+  if (!isSiteAdmin(request) && url.searchParams.get("mine") !== "1") return jsonError("Solo la persona administradora puede consultar las propuestas.", 403);
+  const rows = admin
+    ? await runtime().DB.prepare("SELECT id, owner_email AS ownerEmail, category, message, status, created_at AS createdAt, resolved_at AS resolvedAt, resolution_read_at AS resolutionReadAt FROM improvement_proposals ORDER BY created_at DESC").all()
+    : await runtime().DB.prepare("SELECT id, owner_email AS ownerEmail, category, message, status, created_at AS createdAt, resolved_at AS resolvedAt, resolution_read_at AS resolutionReadAt FROM improvement_proposals WHERE owner_email = ? ORDER BY created_at DESC").bind(owner).all();
   if (url.searchParams.get("format") === "csv") {
     const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
     const lines = [
@@ -75,11 +80,16 @@ export async function GET(request: Request) {
 }
 export async function PATCH(request: Request) {
   await ensureSchema();
-  if (!isSiteAdmin(request)) return jsonError("Solo la persona administradora puede revisar las propuestas.", 403);
   const body = await request.json() as { id?: string; status?: string };
   const id = body.id?.trim();
-  if (!id || body.status !== "reviewed") return jsonError("Petición no válida.", 400);
-  const result = await runtime().DB.prepare("UPDATE improvement_proposals SET status = 'reviewed' WHERE id = ?").bind(id).run();
+  if (!id) return jsonError("Petición no válida.", 400);
+  let result;
+  if (body.status === "reviewed" && isSiteAdmin(request)) result = await runtime().DB.prepare("UPDATE improvement_proposals SET status = 'reviewed' WHERE id = ?").bind(id).run();
+  else if (body.status === "resolved" && isSiteAdmin(request)) result = await runtime().DB.prepare("UPDATE improvement_proposals SET status = 'resolved', resolved_at = ?, resolution_read_at = NULL WHERE id = ?").bind(Date.now(), id).run();
+  else if (body.status === "read") {
+    const owner = await activeOwnerFrom(request); if (!owner) return authenticationError();
+    result = await runtime().DB.prepare("UPDATE improvement_proposals SET resolution_read_at = ? WHERE id = ? AND owner_email = ? AND status = 'resolved'").bind(Date.now(), id, owner).run();
+  } else return jsonError("No tienes permiso para realizar esta acción.", 403);
   if (!result.meta.changes) return jsonError("Propuesta no encontrada.", 404);
-  return Response.json({ id, status: "reviewed" });
+  return Response.json({ id, status: body.status });
 }

@@ -102,4 +102,8 @@ export async function ensureSchema() {
     ["shared_at", "ALTER TABLE jobs ADD COLUMN shared_at INTEGER"],
   ] as const;
   for (const [name, sql] of additions) if (!names.has(name)) await DB.prepare(sql).run();
+  const proposalColumns = await DB.prepare("PRAGMA table_info(improvement_proposals)").all<{ name: string }>();
+  const proposalNames = new Set(proposalColumns.results.map((column) => column.name));
+  if (!proposalNames.has("resolved_at")) await DB.prepare("ALTER TABLE improvement_proposals ADD COLUMN resolved_at INTEGER").run();
+  if (!proposalNames.has("resolution_read_at")) await DB.prepare("ALTER TABLE improvement_proposals ADD COLUMN resolution_read_at INTEGER").run();
 }

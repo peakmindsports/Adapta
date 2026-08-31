@@ -28,7 +28,9 @@ test("creates two independent tasks per level when both is selected", async () =
   assert.match(page, /source === "units" \? files\.unidades : orientationOtherMaterial/);
   assert.match(page, /Banco del Departamento de Orientación · \$\{sourceLabel\} · \$\{level\.targetCourse\}/);
   assert.match(page, /No mezcles este documento con el otro tipo de contenido/);
-  assert.match(page, /createdResults\.push\(\{ jobId: created\.job\.id, result: generated\.result, level: level\.targetCourse, source \}\)/);
+  assert.match(page, /createdResults\.push\(\{ jobId: created\.job\.id, result: generated\.result, level: level\.targetCourse, source, variant \}\)/);
+  assert.match(page, /orientationMaterialCount/);
+  assert.match(page, /Math\.max\(1, Math\.min\(10,/);
 });
 
 test("shows and documents the two separate results", async () => {
@@ -124,7 +126,7 @@ test("asks for the exact improvement location and securely supports image eviden
   assert.match(feedback, /const MAX_IMAGES = 3/);
   assert.match(feedback, /const MAX_IMAGE_BYTES = 8 \* 1024 \* 1024/);
   assert.match(feedback, /runtime\(\)\.FILES\.put\(key, file\.stream\(\)/);
-  assert.match(feedback, /if \(!isSiteAdmin\(request\)\)/);
+  assert.match(feedback, /!isSiteAdmin\(request\) && url\.searchParams\.get\("mine"\) !== "1"/);
   assert.match(feedback, /attachmentKey\.startsWith\("feedback\/"\)/);
 });
 test("accepts generated PDF and Word resources and asks for exact error pages", async () => {
